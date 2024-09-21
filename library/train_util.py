@@ -4828,6 +4828,30 @@ def get_optimizer(args, trainable_params):
         # make optimizer as train mode: we don't need to call train again, because eval will not be called in training loop
         optimizer.train()
 
+    elif optimizer_type == "Fcompass".lower():
+        logger.info(f"use Fcompass optimizer | {optimizer_kwargs}")
+        try:    
+            from library.optimizers.fcompass import FCompass
+
+            optimizer_class = FCompass
+        except: ImportError:
+            raise ImportError(
+                "Importing FCompass failed / Fcompassのインポートに失敗しました。"
+            )
+            optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
+
+    elif optimizer_type == "ClybW".lower():
+        logger.info(f"use ClybW optimizer | {optimizer_kwargs}")
+        try:
+            from library.optimizers.clybius import Compass
+
+            optimizer_class = Compass
+        except ImportError:
+            raise ImportError(
+                "Importing Compass-Clybius failed / インポート Compass-Clybius が失敗しました。"
+            )
+        optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
+
     if optimizer is None:
         # 任意のoptimizerを使う
         case_sensitive_optimizer_type = args.optimizer_type  # not lower
