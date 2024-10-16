@@ -844,6 +844,12 @@ class BaseDataset(torch.utils.data.Dataset):
                 flex_tokens = dropout_tags(flex_tokens)
 
                 caption = ", ".join(fixed_tokens + flex_tokens + fixed_suffix_tokens)
+            elif (
+                    hasattr(subset, "keep_tokens_separator")
+                    and subset.keep_tokens_separator
+                    and subset.keep_tokens_separator in caption
+                 ):
+                caption = ", ".join(c.strip() for c in caption.split(subset.keep_tokens_separator))
 
             # process secondary separator
             if subset.secondary_separator:
