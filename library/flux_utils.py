@@ -52,7 +52,7 @@ def analyze_checkpoint_state(ckpt_path: str) -> Tuple[bool, bool, Tuple[int, int
     keys = []
     for ckpt_path in ckpt_paths:
         with safe_open(ckpt_path, framework="pt") as f:
-            keys.extend(f.keys())
+            keys.extend(k.removeprefix('model.diffusion_model.') for k in f.keys())
 
     # if the key has annoying prefix, remove it
     if keys[0].startswith("model.diffusion_model."):
@@ -125,6 +125,8 @@ def load_flow_model(
         logger.info("Converting Diffusers to BFL")
         sd = convert_diffusers_sd_to_bfl(sd, num_double_blocks, num_single_blocks)
         logger.info("Converted Diffusers to BFL")
+    elif any(k.startswith("model.diffusion_model.") for k in sd.keys()):
+        sd = {k.removeprefix("model.diffusion_model."): v for k, v in sd.items()}
 
     # if the key has annoying prefix, remove it
     for key in list(sd.keys()):
