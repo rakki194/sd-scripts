@@ -1407,7 +1407,7 @@ class BaseDataset(torch.utils.data.Dataset):
                 )
 
     def get_image_size(self, image_path):
-        if image_path.endswith('.jxl'):
+        if image_path.endswith(".jxl"):
             with open(image_path, 'rb') as fp:
                 image_size = get_jxl_metadata_from_bytesio(fp)
         else:
