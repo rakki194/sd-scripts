@@ -394,6 +394,7 @@ def train(args):
         start_freezing_from = max(0, len(filtered_blocks) - num_blocks_to_freeze)
 
         for i in range(start_freezing_from, len(filtered_blocks)):
+            accelerator.print(f'freezing {filtered_blocks[i][0]}')
             _, param = filtered_blocks[i]
             param.requires_grad = False
 
