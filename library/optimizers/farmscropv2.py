@@ -26,6 +26,12 @@ class FARMSCropV2(Optimizer):
             Beta value for slow momentum / EMA (default: 0.9999)
         momentum_amp (float):
             Amplification multiplier for slow momentum / EMA (default: 5.0)
+        clip (float):
+            Clipping value for gradient normalization (default: 1.0)
+        clip_lambda (callable):
+            Lambda function to determine clipping value based on step count (default: step**0.25)
+        decouple (bool):
+            Whether to decouple weight decay from parameter update (default: False)
     """
 
     def __init__(
@@ -40,6 +46,8 @@ class FARMSCropV2(Optimizer):
         momentum_beta=0.9999,
         momentum_amp=5.0,
         clip=1.0,
+        clip_lambda=lambda step: step**0.25,
+        decouple=True,
     ):
         defaults = dict(
             lr=lr,
@@ -51,7 +59,9 @@ class FARMSCropV2(Optimizer):
             momentum_beta=momentum_beta,
             momentum_amp=momentum_amp,
             clip=clip,
+            decouple=decouple,
         )
+        self.clip_lambda = clip_lambda
         super(FARMSCropV2, self).__init__(params, defaults)
 
     def step(self, closure=None):
@@ -102,16 +112,9 @@ class FARMSCropV2(Optimizer):
                         )
                     )
 
-                if weight_decay != 0:
-                    # Perform weight decay
-                    grad_weights = p.data
-
-                    if clip > 0:
-                        rms = grad_weights.pow(2).mean().sqrt_()
-                        divisor = max(clip, rms) / clip
-                        grad_weights.div_(divisor)
-
-                    p.data.add_(grad_weights, alpha=-weight_decay)
+                # Add coupled weight decay here (if not decoupled)
+                if weight_decay != 0 and not group["decouple"]:
+                    grad = grad.add(p.data, alpha=weight_decay)
 
                 if diff_mult > 0:
                     # Get previous grad, initialized at 0 (first step is just grad)
@@ -133,6 +136,11 @@ class FARMSCropV2(Optimizer):
 
                 grad_nat = grad.div(fim_base).mul_(diff_fim_base)
 
+                # Apply clipping to normalized gradient if clip_lambda is set
+                if self.clip_lambda is not None:
+                    clip_val = self.clip_lambda(state["step"])
+                    grad_nat.clamp_(-clip_val, clip_val)
+
                 # Compass-style amplification
                 full_step = grad_nat.add(momentum, alpha=momentum_amp)
 
@@ -143,6 +151,10 @@ class FARMSCropV2(Optimizer):
 
                 # Apply full step
                 p.data.add_(full_step, alpha=-lr)
+
+                # Apply decoupled weight decay after parameter update
+                if weight_decay != 0 and group["decouple"]:
+                    p.data.add_(p.data, alpha=-weight_decay * lr)
 
                 fim.mul_(fim_slow_beta).addcmul_(approx_grad_nat, approx_grad_nat, value=1 - fim_slow_beta)
 
