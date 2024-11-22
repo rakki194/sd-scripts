@@ -4925,7 +4925,7 @@ def get_optimizer(args, trainable_params):
             )
         optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
-    elif optimizer_type == "FARMSCropV2".lower():
+    elif optimizer_type == "FARMS".lower():
         logger.info(f"use FARMSCropV2 optimizer | {optimizer_kwargs}")
         try:
             from library.optimizers.farmscropv2 import FARMSCropV2
