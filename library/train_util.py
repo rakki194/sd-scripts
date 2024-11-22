@@ -6309,9 +6309,8 @@ def sample_image_inference(
     width = max(64, width - width % 8)  # round to divisible by 8
     logger.info(f"prompt: {prompt}")
     logger.info(f"negative_prompt: {negative_prompt}")
-    logger.info(f"height: {height} width: {width} sample_steps: {sample_steps} scale: {scale} sample_sampler: {sampler_name}")
-    if seed is not None:
-        logger.info(f"seed: {seed}")
+    logger.info(f"height: {height} width: {width} sample_steps: {sample_steps} scale: {scale} sample_sampler: {sampler_name}{f' seed: {seed}' if seed is not None else ''}")
+
     with accelerator.autocast():
         latents = pipeline(
             prompt=prompt,

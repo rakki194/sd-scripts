@@ -165,9 +165,7 @@ def sample_image_inference(
     height = max(64, height - height % 16)  # round to divisible by 16
     width = max(64, width - width % 16)  # round to divisible by 16
     logger.info(f"prompt: {prompt}")
-    logger.info(f"height: {height} width: {width} sample_steps: {sample_steps} scale: {scale}")
-    if seed is not None:
-        logger.info(f"seed: {seed}")
+    logger.info(f"height: {height} width: {width} sample_steps: {sample_steps} scale: {scale}{f' seed: {seed}' if seed is not None else ''}")
 
     # encode prompts
     tokenize_strategy = strategy_base.TokenizeStrategy.get_strategy()
