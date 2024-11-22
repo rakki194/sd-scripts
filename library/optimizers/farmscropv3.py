@@ -1,9 +1,9 @@
 import torch
 from torch.optim import Optimizer
 
-class FARMSCropV2(Optimizer):
+class FARMSCropV3(Optimizer):
     r"""
-    FARMSCropV2: Fisher-Accelerated RMSprop, with momentum-based Compass-style amplification, with ADOPT's AdamW changes. (https://arxiv.org/abs/2411.02853).
+    FARMSCropV3: Fisher-Accelerated RMSprop, with momentum-based Compass-style amplification, with ADOPT's AdamW changes. (https://arxiv.org/abs/2411.02853).
     Arguments:
         params (iterable):
             Iterable of parameters to optimize or dicts defining
@@ -62,7 +62,7 @@ class FARMSCropV2(Optimizer):
             decouple=decouple,
         )
         self.clip_lambda = clip_lambda
-        super(FARMSCropV2, self).__init__(params, defaults)
+        super(FARMSCropV3, self).__init__(params, defaults)
 
     def step(self, closure=None):
         loss = None
