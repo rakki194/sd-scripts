@@ -4925,6 +4925,18 @@ def get_optimizer(args, trainable_params):
             )
         optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
+    elif optimizer_type == "FARMSCropV2".lower():
+        logger.info(f"use FARMSCropV2 optimizer | {optimizer_kwargs}")
+        try:
+            from library.optimizers.farmscropv2 import FARMSCropV2
+
+            optimizer_class = FARMSCropV2
+        except ImportError:
+            raise ImportError(
+                "Importing FARMSCropV2 failed / インポート FARMSCropV2 が失敗しました。"
+            )
+        optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
+
     if optimizer is None:
         # 任意のoptimizerを使う
         case_sensitive_optimizer_type = args.optimizer_type  # not lower
