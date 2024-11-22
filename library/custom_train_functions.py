@@ -27,7 +27,7 @@ def prepare_scheduler_for_custom_training(noise_scheduler, device):
 
 def fix_noise_scheduler_betas_for_zero_terminal_snr(noise_scheduler):
     # fix beta: zero terminal SNR
-    logger.info(f"fix noise scheduler betas: https://arxiv.org/abs/2305.08891")
+    logger.info(f"zero terminal SNR enabled. / ゼロ終端SNR有効化")
 
     def enforce_zero_terminal_snr(betas):
         # Convert betas to alphas_bar_sqrt
