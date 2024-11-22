@@ -144,20 +144,15 @@ def sample_image_inference(
     prompt_replacement,
 ):
     assert isinstance(prompt_dict, dict)
-    # negative_prompt = prompt_dict.get("negative_prompt")
     sample_steps = prompt_dict.get("sample_steps", 20)
     width = prompt_dict.get("width", 512)
     height = prompt_dict.get("height", 512)
     scale = prompt_dict.get("scale", 3.5)
     seed = prompt_dict.get("seed")
-    # controlnet_image = prompt_dict.get("controlnet_image")
     prompt: str = prompt_dict.get("prompt", "")
-    # sampler_name: str = prompt_dict.get("sample_sampler", args.sample_sampler)
 
     if prompt_replacement is not None:
         prompt = prompt.replace(prompt_replacement[0], prompt_replacement[1])
-        # if negative_prompt is not None:
-        #     negative_prompt = negative_prompt.replace(prompt_replacement[0], prompt_replacement[1])
 
     if seed is not None:
         torch.manual_seed(seed)
@@ -167,18 +162,10 @@ def sample_image_inference(
         torch.seed()
         torch.cuda.seed()
 
-    # if negative_prompt is None:
-    #     negative_prompt = ""
-
     height = max(64, height - height % 16)  # round to divisible by 16
     width = max(64, width - width % 16)  # round to divisible by 16
     logger.info(f"prompt: {prompt}")
-    # logger.info(f"negative_prompt: {negative_prompt}")
-    logger.info(f"height: {height}")
-    logger.info(f"width: {width}")
-    logger.info(f"sample_steps: {sample_steps}")
-    logger.info(f"scale: {scale}")
-    # logger.info(f"sample_sampler: {sampler_name}")
+    logger.info(f"height: {height} width: {width} sample_steps: {sample_steps} scale: {scale}")
     if seed is not None:
         logger.info(f"seed: {seed}")
 

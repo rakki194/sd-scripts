@@ -514,11 +514,7 @@ def sample_image_inference(
     width = max(64, width - width % 8)  # round to divisible by 8
     logger.info(f"prompt: {prompt}")
     logger.info(f"negative_prompt: {negative_prompt}")
-    logger.info(f"height: {height}")
-    logger.info(f"width: {width}")
-    logger.info(f"sample_steps: {sample_steps}")
-    logger.info(f"scale: {scale}")
-    # logger.info(f"sample_sampler: {sampler_name}")
+    logger.info(f"height: {height} width: {width} sample_steps: {sample_steps} scale: {scale}")
     if seed is not None:
         logger.info(f"seed: {seed}")
 
