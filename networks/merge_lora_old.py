@@ -151,7 +151,6 @@ def merge(args):
 
     merge_to_sd_model(text_encoder, unet, args.models, args.ratios, merge_dtype)
 
-    logger.info("")
     logger.info(f"saving SD model to: {args.save_to}")
     model_util.save_stable_diffusion_checkpoint(args.v2, args.save_to, text_encoder, unet,
                                                 args.sd_model, 0, 0, save_dtype, vae)

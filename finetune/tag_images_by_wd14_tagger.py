@@ -322,7 +322,6 @@ def main(args):
             with open(caption_file, "wt", encoding="utf-8") as f:
                 f.write(tag_text + "\n")
                 if args.debug:
-                    logger.info("")
                     logger.info(f"{image_path}:")
                     logger.info(f"\tRating tags: {rating_tag_text}")
                     logger.info(f"\tCharacter tags: {character_tag_text}")

@@ -5694,7 +5694,6 @@ def save_sd_model_on_epoch_end_or_stepwise_common(
             ckpt_name = get_step_ckpt_name(args, ext, global_step)
 
         ckpt_file = os.path.join(args.output_dir, ckpt_name)
-        logger.info("")
         logger.info(f"saving checkpoint: {ckpt_file}")
         sd_saver(ckpt_file, epoch_no, global_step)
 
@@ -5719,7 +5718,6 @@ def save_sd_model_on_epoch_end_or_stepwise_common(
         else:
             out_dir = os.path.join(args.output_dir, STEP_DIFFUSERS_DIR_NAME.format(model_name, global_step))
 
-        logger.info("")
         logger.info(f"saving model: {out_dir}")
         diffusers_saver(out_dir)
 
@@ -5747,7 +5745,6 @@ def save_sd_model_on_epoch_end_or_stepwise_common(
 def save_and_remove_state_on_epoch_end(args: argparse.Namespace, accelerator, epoch_no):
     model_name = default_if_none(args.output_name, DEFAULT_EPOCH_NAME)
 
-    logger.info("")
     logger.info(f"saving state at epoch {epoch_no}")
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -5769,7 +5766,6 @@ def save_and_remove_state_on_epoch_end(args: argparse.Namespace, accelerator, ep
 def save_and_remove_state_stepwise(args: argparse.Namespace, accelerator, step_no):
     model_name = default_if_none(args.output_name, DEFAULT_STEP_NAME)
 
-    logger.info("")
     logger.info(f"saving state at step {step_no}")
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -5795,7 +5791,6 @@ def save_and_remove_state_stepwise(args: argparse.Namespace, accelerator, step_n
 def save_state_on_train_end(args: argparse.Namespace, accelerator):
     model_name = default_if_none(args.output_name, DEFAULT_LAST_OUTPUT_NAME)
 
-    logger.info("")
     logger.info("saving last state.")
     os.makedirs(args.output_dir, exist_ok=True)
 

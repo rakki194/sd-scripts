@@ -696,7 +696,6 @@ if __name__ == "__main__":
 
     user_config = load_user_config(config_args.dataset_config)
 
-    logger.info("")
     logger.info("[user_config]")
     logger.info(f"{user_config}")
 
@@ -705,12 +704,10 @@ if __name__ == "__main__":
     )
     sanitized_user_config = sanitizer.sanitize_user_config(user_config)
 
-    logger.info("")
     logger.info("[sanitized_user_config]")
     logger.info(f"{sanitized_user_config}")
 
     blueprint = BlueprintGenerator(sanitizer).generate(user_config, argparse_namespace)
 
-    logger.info("")
     logger.info("[blueprint]")
     logger.info(f"{blueprint}")

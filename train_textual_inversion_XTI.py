@@ -415,7 +415,6 @@ def train(args):
         os.makedirs(args.output_dir, exist_ok=True)
         ckpt_file = os.path.join(args.output_dir, ckpt_name)
 
-        logger.info("")
         logger.info(f"saving checkpoint: {ckpt_file}")
         save_weights(ckpt_file, embs, save_dtype)
         if args.huggingface_repo_id is not None:
@@ -429,7 +428,6 @@ def train(args):
 
     # training loop
     for epoch in range(num_train_epochs):
-        logger.info("")
         logger.info(f"epoch {epoch+1}/{num_train_epochs}")
         current_epoch.value = epoch + 1
 

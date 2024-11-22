@@ -2412,7 +2412,6 @@ def main(args):
                 # interactive
                 valid = False
                 while not valid:
-                    logger.info("")
                     logger.info("Type prompt:")
                     try:
                         raw_prompt = input()
