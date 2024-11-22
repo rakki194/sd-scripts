@@ -6147,7 +6147,6 @@ def sample_images_common(
             if steps % args.sample_every_n_steps != 0 or epoch is not None:  # steps is not divisible or end of epoch
                 return
 
-    logger.info("")
     logger.info(f"generating sample images at step / サンプル画像生成 ステップ: {steps}")
     if not os.path.isfile(args.sample_prompts):
         logger.error(f"No prompt file / プロンプトファイルがありません: {args.sample_prompts}")
