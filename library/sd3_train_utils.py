@@ -146,90 +146,88 @@ def add_sd3_training_arguments(parser: argparse.ArgumentParser):
         "--clip_l",
         type=str,
         required=False,
-        help="CLIP-L model path. if not specified, use ckpt's state_dict / CLIP-Lモデルのパス。指定しない場合はckptのstate_dictを使用",
+        help="CLIP-L model path. if not specified, use ckpt's state_dict",
     )
     parser.add_argument(
         "--clip_g",
         type=str,
         required=False,
-        help="CLIP-G model path. if not specified, use ckpt's state_dict / CLIP-Gモデルのパス。指定しない場合はckptのstate_dictを使用",
+        help="CLIP-G model path. if not specified, use ckpt's state_dict",
     )
     parser.add_argument(
         "--t5xxl",
         type=str,
         required=False,
-        help="T5-XXL model path. if not specified, use ckpt's state_dict / T5-XXLモデルのパス。指定しない場合はckptのstate_dictを使用",
+        help="T5-XXL model path. if not specified, use ckpt's state_dict",
     )
     parser.add_argument(
         "--save_clip",
         action="store_true",
-        help="[DOES NOT WORK] unified checkpoint is not supported / 統合チェックポイントはまだサポートされていません",
+        help="[DOES NOT WORK] unified checkpoint is not supported",
     )
     parser.add_argument(
         "--save_t5xxl",
         action="store_true",
-        help="[DOES NOT WORK] unified checkpoint is not supported / 統合チェックポイントはまだサポートされていません",
+        help="[DOES NOT WORK] unified checkpoint is not supported",
     )
 
     parser.add_argument(
         "--t5xxl_device",
         type=str,
         default=None,
-        help="[DOES NOT WORK] not supported yet. T5-XXL device. if not specified, use accelerator's device / T5-XXLデバイス。指定しない場合はacceleratorのデバイスを使用",
+        help="[DOES NOT WORK] not supported yet. T5-XXL device. if not specified, use accelerator's device",
     )
     parser.add_argument(
         "--t5xxl_dtype",
         type=str,
         default=None,
-        help="[DOES NOT WORK] not supported yet. T5-XXL dtype. if not specified, use default dtype (from mixed precision) / T5-XXL dtype。指定しない場合はデフォルトのdtype（mixed precisionから）を使用",
+        help="[DOES NOT WORK] not supported yet. T5-XXL dtype. if not specified, use default dtype (from mixed precision)",
     )
 
     parser.add_argument(
         "--t5xxl_max_token_length",
         type=int,
         default=256,
-        help="maximum token length for T5-XXL. 256 is the default value / T5-XXLの最大トークン長。デフォルトは256",
+        help="maximum token length for T5-XXL. 256 is the default value",
     )
     parser.add_argument(
         "--apply_lg_attn_mask",
         action="store_true",
-        help="apply attention mask (zero embs) to CLIP-L and G / CLIP-LとGにアテンションマスク（ゼロ埋め）を適用する",
+        help="apply attention mask (zero embs) to CLIP-L and G",
     )
     parser.add_argument(
         "--apply_t5_attn_mask",
         action="store_true",
-        help="apply attention mask (zero embs) to T5-XXL / T5-XXLにアテンションマスク（ゼロ埋め）を適用する",
+        help="apply attention mask (zero embs) to T5-XXL",
     )
     parser.add_argument(
         "--clip_l_dropout_rate",
         type=float,
         default=0.0,
-        help="Dropout rate for CLIP-L encoder, default is 0.0 / CLIP-Lエンコーダのドロップアウト率、デフォルトは0.0",
+        help="Dropout rate for CLIP-L encoder, default is 0.0",
     )
     parser.add_argument(
         "--clip_g_dropout_rate",
         type=float,
         default=0.0,
-        help="Dropout rate for CLIP-G encoder, default is 0.0 / CLIP-Gエンコーダのドロップアウト率、デフォルトは0.0",
+        help="Dropout rate for CLIP-G encoder, default is 0.0",
     )
     parser.add_argument(
         "--t5_dropout_rate",
         type=float,
         default=0.0,
-        help="Dropout rate for T5 encoder, default is 0.0 / T5エンコーダのドロップアウト率、デフォルトは0.0",
+        help="Dropout rate for T5 encoder, default is 0.0",
     )
     parser.add_argument(
         "--pos_emb_random_crop_rate",
         type=float,
         default=0.0,
-        help="Random crop rate for positional embeddings, default is 0.0. Only for SD3.5M"
-        " / 位置埋め込みのランダムクロップ率、デフォルトは0.0。SD3.5M以外では予期しない動作になります",
+        help="Random crop rate for positional embeddings, default is 0.0. Only for SD3.5M",
     )
     parser.add_argument(
         "--enable_scaled_pos_embed",
         action="store_true",
-        help="Scale position embeddings for each resolution during multi-resolution training. Only for SD3.5M"
-        " / 複数解像度学習時に解像度ごとに位置埋め込みをスケーリングする。SD3.5M以外では予期しない動作になります",
+        help="Scale position embeddings for each resolution during multi-resolution training. Only for SD3.5M",
     )
 
     # Dependencies of Diffusers noise sampler has been removed for clarity in training
@@ -238,17 +236,17 @@ def add_sd3_training_arguments(parser: argparse.ArgumentParser):
         "--training_shift",
         type=float,
         default=1.0,
-        help="Discrete flow shift for training timestep distribution adjustment, applied in addition to the weighting scheme, default is 1.0. /タイムステップ分布のための離散フローシフト、重み付けスキームの上に適用される、デフォルトは1.0。",
+        help="Discrete flow shift for training timestep distribution adjustment, applied in addition to the weighting scheme, default is 1.0.",
     )
 
 
 def verify_sdxl_training_args(args: argparse.Namespace, supportTextEncoderCaching: bool = True):
-    assert not args.v2, "v2 cannot be enabled in SDXL training / SDXL学習ではv2を有効にすることはできません"
+    assert not args.v2, "v2 cannot be enabled in SDXL training"
     if args.v_parameterization:
-        logger.info("v_parameterization is enabled / v_parameterizationが有効になりました")
+        logger.info("v_parameterization is enabled")
 
     if args.clip_skip is not None:
-        logger.warning("clip_skip will be unexpected / SDXL学習ではclip_skipは動作しません")
+        logger.warning("clip_skip will be unexpected")
 
     # if args.multires_noise_iterations:
     #     logger.info(
@@ -259,20 +257,19 @@ def verify_sdxl_training_args(args: argparse.Namespace, supportTextEncoderCachin
     #         args.noise_offset = DEFAULT_NOISE_OFFSET
     #     elif args.noise_offset != DEFAULT_NOISE_OFFSET:
     #         logger.info(
-    #             f"Warning: SDXL has been trained with noise_offset={DEFAULT_NOISE_OFFSET} / SDXLはnoise_offset={DEFAULT_NOISE_OFFSET}で学習されています"
+    #             f"Warning: SDXL has been trained with noise_offset={DEFAULT_NOISE_OFFSET}"
     #         )
-    #     logger.info(f"noise_offset is set to {args.noise_offset} / noise_offsetが{args.noise_offset}に設定されました")
+    #     logger.info(f"noise_offset is set to {args.noise_offset}")
 
     assert (
         not hasattr(args, "weighted_captions") or not args.weighted_captions
-    ), "weighted_captions cannot be enabled in SDXL training currently / SDXL学習では今のところweighted_captionsを有効にすることはできません"
+    ), "weighted_captions cannot be enabled in SDXL training currently"
 
     if supportTextEncoderCaching:
         if args.cache_text_encoder_outputs_to_disk and not args.cache_text_encoder_outputs:
             args.cache_text_encoder_outputs = True
             logger.warning(
-                "cache_text_encoder_outputs is enabled because cache_text_encoder_outputs_to_disk is enabled / "
-                + "cache_text_encoder_outputs_to_diskが有効になっているためcache_text_encoder_outputsが有効になりました"
+                "cache_text_encoder_outputs is enabled because cache_text_encoder_outputs_to_disk is enabled"
             )
 
 
@@ -396,9 +393,9 @@ def sample_images(
             if steps % args.sample_every_n_steps != 0 or epoch is not None:  # steps is not divisible or end of epoch
                 return
 
-    logger.info(f"generating sample images at step / サンプル画像生成 ステップ: {steps}")
+    logger.info(f"generating sample images at step: {steps}")
     if not os.path.isfile(args.sample_prompts) and sample_prompts_te_outputs is None:
-        logger.error(f"No prompt file / プロンプトファイルがありません: {args.sample_prompts}")
+        logger.error(f"No prompt file: {args.sample_prompts}")
         return
 
     distributed_state = PartialState()  # for multi gpu distributed inference. this is a singleton, so it's safe to use it here
