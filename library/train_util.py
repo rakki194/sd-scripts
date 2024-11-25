@@ -4063,7 +4063,7 @@ def add_dit_training_arguments(parser: argparse.ArgumentParser):
         help="[EXPERIMENTAL] "
         "Sets the number of blocks to swap during the forward and backward passes."
         "Increasing this number lowers the overall VRAM used during training at the expense of training speed (s/it)."
-    ).
+    )
 
 
 def get_sanitized_config_or_none(args: argparse.Namespace):
