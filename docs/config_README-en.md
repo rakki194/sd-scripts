@@ -1,10 +1,3 @@
-Original Source by kohya-ss
-
-First version:
-A.I Translation by Model: NousResearch/Nous-Hermes-2-Mixtral-8x7B-DPO, editing by Darkstorm2150
-
-Some parts are manually added.
-
 # Config Readme
 
 This README is about the configuration files that can be passed with the `--dataset_config` option.
@@ -226,11 +219,11 @@ The options available when the caption dropout method can be used exist only for
 
 Options related to the setting of subsets that caption dropout can be used for.
 
-| Option Name | `[general]` | `[[datasets]]` | `[[dataset.subsets]]` |
-| ---- | ---- | ---- | ---- |
-| `caption_dropout_every_n_epochs` | o | o | o |
-| `caption_dropout_rate` | o | o | o |
-| `caption_tag_dropout_rate` | o | o | o |
+| Option Name                         | `[general]`   | `[[datasets]]`   | `[[dataset.subsets]]` |
+| ----------------------------------- | ------------- | ---------------- | --------------------  |
+| `caption_dropout_every_n_epochs`    | o             | o                | o                     |
+| `caption_dropout_rate`              | o             | o                | o                     |
+| `caption_tag_dropout_rate`          | o             | o                | o                     |
 
 ## Behavior when there are duplicate subsets
 
@@ -266,25 +259,25 @@ The following command line argument options are ignored if a configuration file 
 
 The following command line argument options are given priority over the configuration file options if both are specified simultaneously. In most cases, they have the same names as the corresponding options in the configuration file.
 
-| Command Line Argument Option   | Prioritized Configuration File Option |
-| ------------------------------- | ------------------------------------- |
-| `--bucket_no_upscale`           |                                       |
-| `--bucket_reso_steps`           |                                       |
-| `--caption_dropout_every_n_epochs` |                                       |
-| `--caption_dropout_rate`        |                                       |
-| `--caption_extension`           |                                       |
-| `--caption_tag_dropout_rate`    |                                       |
-| `--color_aug`                   |                                       |
-| `--dataset_repeats`             | `num_repeats`                          |
-| `--enable_bucket`               |                                       |
-| `--face_crop_aug_range`         |                                       |
-| `--flip_aug`                    |                                       |
-| `--keep_tokens`                 |                                       |
-| `--min_bucket_reso`              |                                       |
-| `--random_crop`                 |                                       |
-| `--resolution`                  |                                       |
-| `--shuffle_caption`             |                                       |
-| `--train_batch_size`            | `batch_size`                           |
+| Command Line Argument Option       | Prioritized Configuration File Option   |
+| ---------------------------------- | --------------------------------------- |
+| `--bucket_no_upscale`              |                                         |
+| `--bucket_reso_steps`              |                                         |
+| `--caption_dropout_every_n_epochs` |                                         |
+| `--caption_dropout_rate`           |                                         |
+| `--caption_extension`              |                                         |
+| `--caption_tag_dropout_rate`       |                                         |
+| `--color_aug`                      |                                         |
+| `--dataset_repeats`                | `num_repeats`                           |
+| `--enable_bucket`                  |                                         |
+| `--face_crop_aug_range`            |                                         |
+| `--flip_aug`                       |                                         |
+| `--keep_tokens`                    |                                         |
+| `--min_bucket_reso`                |                                         |
+| `--random_crop`                    |                                         |
+| `--resolution`                     |                                         |
+| `--shuffle_caption`                |                                         |
+| `--train_batch_size`               | `batch_size`                            |
 
 ## Error Guide
 
@@ -343,18 +336,18 @@ caption_extension = ".txt"
 keep_tokens_separator= "|||"
 shuffle_caption = true
 caption_tag_dropout_rate = 0.1
-secondary_separator = ";;;" # subset 側に書くこともできます / can be written in the subset side
-enable_wildcard = true # 同上 / same as above
+secondary_separator = ";;;" # can be written in the subset side
+enable_wildcard = true # same as above
 
   [[datasets.subsets]]
   image_dir = "/path/to/image_dir"
   num_repeats = 1
 
-  # ||| の前後はカンマは不要です（自動的に追加されます） / No comma is required before and after ||| (it is added automatically)
+  # No comma is required before and after ||| (it is added automatically)
   caption_prefix = "1girl, hatsune miku, vocaloid |||" 
   
-  # ||| の後はシャッフル、drop されず残ります / After |||, it is not shuffled or dropped and remains
-  # 単純に文字列として連結されるので、カンマなどは自分で入れる必要があります / It is simply concatenated as a string, so you need to put commas yourself
+  # After |||, it is not shuffled or dropped and remains
+  # It is simply concatenated as a string, so you need to put commas yourself
   caption_suffix = ", anime screencap ||| masterpiece, rating: general"
 ```
 
@@ -383,4 +376,3 @@ If you want to include `{` or `}` in the tag string, double them like `{{` or `}
 1girl, hatsune miku, vocaloid ||| stage, microphone, white shirt, smile ||| best quality, rating: general
 ```
 It becomes `1girl, hatsune miku, vocaloid, microphone, stage, white shirt, best quality, rating: general` or `1girl, hatsune miku, vocaloid, white shirt, smile, stage, microphone, best quality, rating: general` etc.
-
