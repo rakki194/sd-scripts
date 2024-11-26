@@ -30,15 +30,15 @@ def add_logging_arguments(parser):
         type=str,
         default=None,
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-        help="Set the logging level, default is INFO / ログレベルを設定する。デフォルトはINFO",
+        help="Set the logging level, default is INFO.",
     )
     parser.add_argument(
         "--console_log_file",
         type=str,
         default=None,
-        help="Log to a file instead of stderr / 標準エラー出力ではなくファイルにログを出力する",
+        help="Log to a file instead of stderr.",
     )
-    parser.add_argument("--console_log_simple", action="store_true", help="Simple log output / シンプルなログ出力")
+    parser.add_argument("--console_log_simple", action="store_true", help="Simple log output.")
 
 
 def setup_logging(args=None, log_level=None, reset=False):

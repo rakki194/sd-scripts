@@ -36,37 +36,35 @@ class FluxNetworkTrainer(train_network.NetworkTrainer):
 
         if args.cache_text_encoder_outputs_to_disk and not args.cache_text_encoder_outputs:
             logger.warning(
-                "cache_text_encoder_outputs_to_disk is enabled, so cache_text_encoder_outputs is also enabled / cache_text_encoder_outputs_to_diskが有効になっているため、cache_text_encoder_outputsも有効になります"
+                "cache_text_encoder_outputs_to_disk is enabled, so cache_text_encoder_outputs is also enabled."
             )
             args.cache_text_encoder_outputs = True
 
         if args.cache_text_encoder_outputs:
             assert (
                 train_dataset_group.is_text_encoder_output_cacheable()
-            ), "when caching Text Encoder output, either caption_dropout_rate, shuffle_caption, token_warmup_step or caption_tag_dropout_rate cannot be used / Text Encoderの出力をキャッシュするときはcaption_dropout_rate, shuffle_caption, token_warmup_step, caption_tag_dropout_rateは使えません"
+            ), "when caching Text Encoder output, either caption_dropout_rate, shuffle_caption, token_warmup_step or caption_tag_dropout_rate cannot be used."
 
         # prepare CLIP-L/T5XXL training flags
         self.train_clip_l = not args.network_train_unet_only
         self.train_t5xxl = False  # default is False even if args.network_train_unet_only is False
 
         if args.max_token_length is not None:
-            logger.warning("max_token_length is not used in Flux training / max_token_lengthはFluxのトレーニングでは使用されません")
+            logger.warning("max_token_length is not used in Flux training.")
 
         assert (
             args.blocks_to_swap is None or args.blocks_to_swap == 0
-        ) or not args.cpu_offload_checkpointing, "blocks_to_swap is not supported with cpu_offload_checkpointing / blocks_to_swapはcpu_offload_checkpointingと併用できません"
+        ) or not args.cpu_offload_checkpointing, "blocks_to_swap is not supported with cpu_offload_checkpointing."
 
         # deprecated split_mode option
         if args.split_mode:
             if args.blocks_to_swap is not None:
                 logger.warning(
                     "split_mode is deprecated. Because `--blocks_to_swap` is set, `--split_mode` is ignored."
-                    " / split_modeは非推奨です。`--blocks_to_swap`が設定されているため、`--split_mode`は無視されます。"
                 )
             else:
                 logger.warning(
                     "split_mode is deprecated. Please use `--blocks_to_swap` instead. `--blocks_to_swap 18` is automatically set."
-                    " / split_modeは非推奨です。代わりに`--blocks_to_swap`を使用してください。`--blocks_to_swap 18`が自動的に設定されました。"
                 )
                 args.blocks_to_swap = 18  # 18 is safe for most cases
 
@@ -91,7 +89,6 @@ class FluxNetworkTrainer(train_network.NetworkTrainer):
             else:
                 logger.info(
                     "Cast FLUX model to fp8. This may take a while. You can reduce the time by using fp8 checkpoint."
-                    " / FLUXモデルをfp8に変換しています。これには時間がかかる場合があります。fp8チェックポイントを使用することで時間を短縮できます。"
                 )
                 model.to(torch.float8_e4m3fn)
 
@@ -157,7 +154,7 @@ class FluxNetworkTrainer(train_network.NetworkTrainer):
 
         if self.train_t5xxl and args.cache_text_encoder_outputs:
             raise ValueError(
-                "T5XXL is trained, so cache_text_encoder_outputs cannot be used / T5XXL学習時はcache_text_encoder_outputsは使用できません"
+                "T5XXL is trained, so cache_text_encoder_outputs cannot be used."
             )
 
     def get_models_for_text_encoding(self, args, accelerator, text_encoders):
@@ -558,7 +555,6 @@ def setup_parser() -> argparse.ArgumentParser:
         # help="[EXPERIMENTAL] use split mode for Flux model, network arg `train_blocks=single` is required"
         # + "/[実験的] Fluxモデルの分割モードを使用する。ネットワーク引数`train_blocks=single`が必要",
         help="[Deprecated] This option is deprecated. Please use `--blocks_to_swap` instead."
-        " / このオプションは非推奨です。代わりに`--blocks_to_swap`を使用してください。",
     )
     return parser
 

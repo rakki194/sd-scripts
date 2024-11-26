@@ -985,7 +985,7 @@ class BaseDataset(torch.utils.data.Dataset):
         # bucket情報を表示、格納する
         if self.enable_bucket:
             self.bucket_info = {"buckets": {}}
-            logger.info("number of images (including repeats) / 各bucketの画像枚数（繰り返し回数を含む）")
+            logger.info("number of images (including repeats)")
             for i, (reso, bucket) in enumerate(zip(self.bucket_manager.resos, self.bucket_manager.buckets)):
                 count = len(bucket)
                 if count > 0:
@@ -1016,8 +1016,7 @@ class BaseDataset(torch.utils.data.Dataset):
 
     def verify_bucket_reso_steps(self, min_steps: int):
         assert self.bucket_reso_steps is None or self.bucket_reso_steps % min_steps == 0, (
-            f"bucket_reso_steps is {self.bucket_reso_steps}. it must be divisible by {min_steps}.\n"
-            + f"bucket_reso_stepsが{self.bucket_reso_steps}です。{min_steps}で割り切れる必要があります"
+            f"bucket_reso_steps is {self.bucket_reso_steps}. it must be divisible by {min_steps}."
         )
 
     def is_latent_cacheable(self):
@@ -2270,7 +2269,7 @@ class ControlNetDataset(BaseDataset):
         for subset in subsets:
             assert (
                 not subset.random_crop
-            ), "random_crop is not supported in ControlNetDataset / random_cropはControlNetDatasetではサポートされていません"
+            ), "random_crop is not supported in ControlNetDataset"
             db_subset = DreamBoothSubset(
                 subset.image_dir,
                 False,
@@ -2354,10 +2353,10 @@ class ControlNetDataset(BaseDataset):
 
         assert (
             len(missing_imgs) == 0
-        ), f"missing conditioning data for {len(missing_imgs)} images / 制御用画像が見つかりませんでした: {missing_imgs}"
+        ), f"missing conditioning data for {len(missing_imgs)} images: {missing_imgs}"
         assert (
             len(extra_imgs) == 0
-        ), f"extra conditioning data for {len(extra_imgs)} images / 余分な制御用画像があります: {extra_imgs}"
+        ), f"extra conditioning data for {len(extra_imgs)} images: {extra_imgs}"
 
         self.conditioning_image_transforms = IMAGE_TRANSFORMS
 
@@ -2404,7 +2403,7 @@ class ControlNetDataset(BaseDataset):
             if self.dreambooth_dataset_delegate.enable_bucket:
                 assert (
                     cond_img.shape[0] == original_size_hw[0] and cond_img.shape[1] == original_size_hw[1]
-                ), f"size of conditioning image is not match / 画像サイズが合いません: {image_info.absolute_path}"
+                ), f"size of conditioning image is not match : {image_info.absolute_path}"
                 cond_img = cv2.resize(
                     cond_img, image_info.resized_size, interpolation=cv2.INTER_AREA
                 )  # INTER_AREAでやりたいのでcv2でリサイズ

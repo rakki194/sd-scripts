@@ -72,7 +72,7 @@ def train(args):
             ignored = ["train_data_dir", "in_json"]
             if any(getattr(args, attr) is not None for attr in ignored):
                 logger.warning(
-                    "ignore following options because config file is found: {0} / 設定ファイルが利用されるため以下のオプションは無視されます: {0}".format(
+                    "ignore following options because config file is found: {0}".format(
                         ", ".join(ignored)
                     )
                 )
@@ -308,10 +308,10 @@ def train(args):
     accelerator.print(f"  num epochs / epoch数: {num_train_epochs}")
     accelerator.print(f"  batch size per device / バッチサイズ: {args.train_batch_size}")
     accelerator.print(
-        f"  total train batch size (with parallel & distributed & accumulation) / 総バッチサイズ（並列学習、勾配合計含む）: {total_batch_size}"
+        f"  total train batch size (with parallel & distributed & accumulation): {total_batch_size}"
     )
     accelerator.print(f"  gradient accumulation steps / 勾配を合計するステップ数 = {args.gradient_accumulation_steps}")
-    accelerator.print(f"  total optimization steps / 学習ステップ数: {args.max_train_steps}")
+    accelerator.print(f"  total optimization steps: {args.max_train_steps}")
 
     progress_bar = tqdm(range(args.max_train_steps), smoothing=0, disable=not accelerator.is_local_main_process, desc="steps")
     global_step = 0
@@ -532,19 +532,19 @@ def setup_parser() -> argparse.ArgumentParser:
     custom_train_functions.add_custom_train_arguments(parser)
 
     parser.add_argument(
-        "--diffusers_xformers", action="store_true", help="use xformers by diffusers / Diffusersでxformersを使用する"
+        "--diffusers_xformers", action="store_true", help="use xformers by diffusers"
     )
-    parser.add_argument("--train_text_encoder", action="store_true", help="train text encoder / text encoderも学習する")
+    parser.add_argument("--train_text_encoder", action="store_true", help="train text encoder")
     parser.add_argument(
         "--learning_rate_te",
         type=float,
         default=None,
-        help="learning rate for text encoder, default is same as unet / Text Encoderの学習率、デフォルトはunetと同じ",
+        help="learning rate for text encoder, default is same as unet",
     )
     parser.add_argument(
         "--no_half_vae",
         action="store_true",
-        help="do not use fp16/bf16 VAE in mixed precision (use float VAE) / mixed precisionでも fp16/bf16 VAEを使わずfloat VAEを使う",
+        help="do not use fp16/bf16 VAE in mixed precision (use float VAE)",
     )
 
     return parser

@@ -105,16 +105,16 @@ def train(args):
 
     assert (
         not args.weighted_captions or not args.cache_text_encoder_outputs
-    ), "weighted_captions is not supported when caching text encoder outputs / cache_text_encoder_outputsを使うときはweighted_captionsはサポートされていません"
+    ), "weighted_captions is not supported when caching text encoder outputs."
     assert (
         not args.train_text_encoder or not args.cache_text_encoder_outputs
-    ), "cache_text_encoder_outputs is not supported when training text encoder / text encoderを学習するときはcache_text_encoder_outputsはサポートされていません"
+    ), "cache_text_encoder_outputs is not supported when training text encoder."
 
     if args.block_lr:
         block_lrs = [float(lr) for lr in args.block_lr.split(",")]
         assert (
             len(block_lrs) == UNET_NUM_BLOCKS_FOR_BLOCK_LR
-        ), f"block_lr must have {UNET_NUM_BLOCKS_FOR_BLOCK_LR} values / block_lrは{UNET_NUM_BLOCKS_FOR_BLOCK_LR}個の値を指定してください"
+        ), f"block_lr must have {UNET_NUM_BLOCKS_FOR_BLOCK_LR} values."
     else:
         block_lrs = None
 
@@ -144,7 +144,7 @@ def train(args):
             ignored = ["train_data_dir", "in_json"]
             if any(getattr(args, attr) is not None for attr in ignored):
                 logger.warning(
-                    "ignore following options because config file is found: {0} / 設定ファイルが利用されるため以下のオプションは無視されます: {0}".format(
+                    "ignore following options because config file is found: {0}".format(
                         ", ".join(ignored)
                     )
                 )
@@ -191,20 +191,18 @@ def train(args):
         train_util.debug_dataset(train_dataset_group, True)
         return
     if len(train_dataset_group) == 0:
-        logger.error(
-            "No data found. Please verify the metadata file and train_data_dir option. / 画像がありません。メタデータおよびtrain_data_dirオプションを確認してください。"
-        )
+        logger.error("No data found. Please verify the metadata file and train_data_dir option.")
         return
 
     if cache_latents:
         assert (
             train_dataset_group.is_latent_cacheable()
-        ), "when caching latents, either color_aug or random_crop cannot be used / latentをキャッシュするときはcolor_augとrandom_cropは使えません"
+        ), "when caching latents, either color_aug or random_crop cannot be used."
 
     if args.cache_text_encoder_outputs:
         assert (
             train_dataset_group.is_text_encoder_output_cacheable()
-        ), "when caching text encoder output, either caption_dropout_rate, shuffle_caption, token_warmup_step or caption_tag_dropout_rate cannot be used / text encoderの出力をキャッシュするときはcaption_dropout_rate, shuffle_caption, token_warmup_step, caption_tag_dropout_rateは使えません"
+        ), "when caching text encoder output, either caption_dropout_rate, shuffle_caption, token_warmup_step or caption_tag_dropout_rate cannot be used."
 
     # acceleratorを準備する
     logger.info("prepare accelerator")
@@ -439,7 +437,7 @@ def train(args):
             len(train_dataloader) / accelerator.num_processes / args.gradient_accumulation_steps
         )
         accelerator.print(
-            f"override steps. steps for {args.max_train_epochs} epochs is / 指定エポックまでのステップ数: {args.max_train_steps}"
+            f"override steps. steps for {args.max_train_epochs} epochs is: {args.max_train_steps}"
         )
 
     # データセット側にも学習ステップを送信
@@ -457,7 +455,7 @@ def train(args):
     if args.full_fp16:
         assert (
             args.mixed_precision == "fp16"
-        ), "full_fp16 requires mixed precision='fp16' / full_fp16を使う場合はmixed_precision='fp16'を指定してください。"
+        ), "full_fp16 requires mixed precision='fp16'"
         accelerator.print("enable full fp16 training.")
         unet.to(weight_dtype)
         text_encoder1.to(weight_dtype)
@@ -465,7 +463,7 @@ def train(args):
     elif args.full_bf16:
         assert (
             args.mixed_precision == "bf16"
-        ), "full_bf16 requires mixed precision='bf16' / full_bf16を使う場合はmixed_precision='bf16'を指定してください。"
+        ), "full_bf16 requires mixed precision='bf16'"
         accelerator.print("enable full bf16 training.")
         unet.to(weight_dtype)
         text_encoder1.to(weight_dtype)
@@ -578,18 +576,18 @@ def train(args):
 
     # 学習する
     # total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
-    accelerator.print("running training / 学習開始")
-    accelerator.print(f"  num examples / サンプル数: {train_dataset_group.num_train_images}")
-    accelerator.print(f"  num batches per epoch / 1epochのバッチ数: {len(train_dataloader)}")
-    accelerator.print(f"  num epochs / epoch数: {num_train_epochs}")
+    accelerator.print("running training")
+    accelerator.print(f"  num examples: {train_dataset_group.num_train_images}")
+    accelerator.print(f"  num batches per epoch: {len(train_dataloader)}")
+    accelerator.print(f"  num epochs: {num_train_epochs}")
     accelerator.print(
-        f"  batch size per device / バッチサイズ: {', '.join([str(d.batch_size) for d in train_dataset_group.datasets])}"
+        f"  batch size per device: {', '.join([str(d.batch_size) for d in train_dataset_group.datasets])}"
     )
     # accelerator.print(
     #     f"  total train batch size (with parallel & distributed & accumulation) / 総バッチサイズ（並列学習、勾配合計含む）: {total_batch_size}"
     # )
-    accelerator.print(f"  gradient accumulation steps / 勾配を合計するステップ数 = {args.gradient_accumulation_steps}")
-    accelerator.print(f"  total optimization steps / 学習ステップ数: {args.max_train_steps}")
+    accelerator.print(f"  gradient accumulation steps = {args.gradient_accumulation_steps}")
+    accelerator.print(f"  total optimization steps: {args.max_train_steps}")
 
     progress_bar = tqdm(range(args.max_train_steps), smoothing=0, disable=not accelerator.is_local_main_process, desc="steps")
     global_step = 0
@@ -911,36 +909,35 @@ def setup_parser() -> argparse.ArgumentParser:
         "--learning_rate_te1",
         type=float,
         default=None,
-        help="learning rate for text encoder 1 (ViT-L) / text encoder 1 (ViT-L)の学習率",
+        help="learning rate for text encoder 1 (ViT-L)",
     )
     parser.add_argument(
         "--learning_rate_te2",
         type=float,
         default=None,
-        help="learning rate for text encoder 2 (BiG-G) / text encoder 2 (BiG-G)の学習率",
+        help="learning rate for text encoder 2 (BiG-G)",
     )
 
     parser.add_argument(
-        "--diffusers_xformers", action="store_true", help="use xformers by diffusers / Diffusersでxformersを使用する"
+        "--diffusers_xformers", action="store_true", help="use xformers by diffusers"
     )
-    parser.add_argument("--train_text_encoder", action="store_true", help="train text encoder / text encoderも学習する")
+    parser.add_argument("--train_text_encoder", action="store_true", help="train text encoder")
     parser.add_argument(
         "--no_half_vae",
         action="store_true",
-        help="do not use fp16/bf16 VAE in mixed precision (use float VAE) / mixed precisionでも fp16/bf16 VAEを使わずfloat VAEを使う",
+        help="do not use fp16/bf16 VAE in mixed precision (use float VAE)",
     )
     parser.add_argument(
         "--block_lr",
         type=str,
         default=None,
-        help=f"learning rates for each block of U-Net, comma-separated, {UNET_NUM_BLOCKS_FOR_BLOCK_LR} values / "
-        + f"U-Netの各ブロックの学習率、カンマ区切り、{UNET_NUM_BLOCKS_FOR_BLOCK_LR}個の値",
+        help=f"learning rates for each block of U-Net, comma-separated, {UNET_NUM_BLOCKS_FOR_BLOCK_LR} values",
     )
     parser.add_argument(
         "--fused_optimizer_groups",
         type=int,
         default=None,
-        help="number of optimizers for fused backward pass and optimizer step / fused backward passとoptimizer stepのためのoptimizer数",
+        help="number of optimizers for fused backward pass and optimizer step",
     )
     return parser
 
