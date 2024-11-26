@@ -68,7 +68,27 @@ def sample_images(
         text_encoders = [accelerator.unwrap_model(te) for te in text_encoders]
     # print([(te.parameters().__next__().device if te is not None else None) for te in text_encoders])
 
-    prompts = train_util.load_prompts(args.sample_prompts)
+    # Cache text encoder outputs for sample prompts if not already cached
+    if sample_prompts_te_outputs is None and args.cache_text_encoder_outputs:
+        sample_prompts_te_outputs = {}
+        prompts = train_util.load_prompts(args.sample_prompts)
+        tokenize_strategy = strategy_base.TokenizeStrategy.get_strategy()
+        encoding_strategy = strategy_base.TextEncodingStrategy.get_strategy()
+
+        logger.info("Caching text encoder outputs for sample prompts...")
+        with torch.no_grad(), accelerator.autocast():
+            for prompt_dict in prompts:
+                prompt = prompt_dict.get("prompt", "")
+                if prompt not in sample_prompts_te_outputs:
+                    tokens_and_masks = tokenize_strategy.tokenize(prompt)
+                    text_encoder_conds = encoding_strategy.encode_tokens(
+                        tokenize_strategy, 
+                        text_encoders, 
+                        tokens_and_masks,
+                        args.apply_t5_attn_mask
+                    )
+                    sample_prompts_te_outputs[prompt] = text_encoder_conds
+                    logger.info(f"Cached text encoder outputs for prompt: {prompt}")
 
     save_dir = args.output_dir + "/sample"
     os.makedirs(save_dir, exist_ok=True)
@@ -166,29 +186,11 @@ def sample_image_inference(
     logger.info(f"prompt: {prompt}")
     logger.info(f"height: {height} width: {width} sample_steps: {sample_steps} scale: {scale}{f' seed: {seed}' if seed is not None else ''}")
 
-    # encode prompts
-    tokenize_strategy = strategy_base.TokenizeStrategy.get_strategy()
-    encoding_strategy = strategy_base.TextEncodingStrategy.get_strategy()
-
-    text_encoder_conds = []
-    if sample_prompts_te_outputs and prompt in sample_prompts_te_outputs:
-        text_encoder_conds = sample_prompts_te_outputs[prompt]
-        print(f"Using cached text encoder outputs for prompt: {prompt}")
-    if text_encoders is not None:
-        print(f"Encoding prompt: {prompt}")
-        tokens_and_masks = tokenize_strategy.tokenize(prompt)
-        # strategy has apply_t5_attn_mask option
-        encoded_text_encoder_conds = encoding_strategy.encode_tokens(tokenize_strategy, text_encoders, tokens_and_masks)
-
-        # if text_encoder_conds is not cached, use encoded_text_encoder_conds
-        if len(text_encoder_conds) == 0:
-            text_encoder_conds = encoded_text_encoder_conds
-        else:
-            # if encoded_text_encoder_conds is not None, update cached text_encoder_conds
-            for i in range(len(encoded_text_encoder_conds)):
-                if encoded_text_encoder_conds[i] is not None:
-                    text_encoder_conds[i] = encoded_text_encoder_conds[i]
-
+    # Get text encoder outputs from cache
+    if not sample_prompts_te_outputs or prompt not in sample_prompts_te_outputs:
+        raise ValueError(f"No cached text encoder outputs found for prompt: {prompt}")
+    
+    text_encoder_conds = sample_prompts_te_outputs[prompt]
     l_pooled, t5_out, txt_ids, t5_attn_mask = text_encoder_conds
 
     # sample image
