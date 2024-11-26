@@ -4848,6 +4848,16 @@ def get_optimizer(args, trainable_params):
             raise ImportError("Importing FCompass failed")
         optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
+    elif optimizer_type == "SAVEUS".lower():
+        logger.info(f"use SAVEUS optimizer | {optimizer_kwargs}")
+        try:
+            from library.optimizers.saveus import SAVEUS
+
+            optimizer_class = SAVEUS
+        except ImportError:
+            raise ImportError("Importing SAVEUS failed")
+        optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
+
     elif optimizer_type == "ClybW".lower():
         logger.info(f"use ClybW optimizer | {optimizer_kwargs}")
         try:
