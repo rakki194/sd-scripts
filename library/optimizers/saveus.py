@@ -1,6 +1,6 @@
 import torch
 from torch.optim import Optimizer
-from typing import Callable, Optional, Tuple, List, Union
+from typing import Callable, Optional
 
 class SAVEUS(Optimizer):
     r"""
