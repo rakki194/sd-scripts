@@ -1,84 +1,53 @@
 import torch
 from torch.optim import Optimizer
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 
 class SAVEUS(Optimizer):
     r"""
-    Implements the SAVEUS optimization algorithm, incorporating ADOPT's advanced techniques.
-
+    Implements the SAVEUS optimization algorithm, incorporating techniques from ADOPT.
+    
     Arguments:
         params (iterable):
             Iterable of parameters to optimize or dicts defining parameter groups.
         lr (float, optional):
             Learning rate (default: 1e-3).
         betas (Tuple[float, float], optional):
-            Coefficients used for computing running averages of gradient and its square (default: (0.9, 0.9999)).
+            Coefficients used for computing running averages of gradient and its square (default: (0.9, 0.999)).
         eps (float, optional):
-            Term added to the denominator to improve numerical stability (default: 1e-6).
-        amp_fac (float, optional):
-            Amplification factor for the first moment filter (default: 2.0).
+            Term added to the denominator to improve numerical stability (default: 1e-8).
         weight_decay (float, optional):
-            Weight decay (L2 penalty) (default: 0.1).
+            Weight decay (L2 penalty) (default: 0).
         centralization (float, optional):
-            Center model gradient (default: 0.5).
+            Center model gradients (default: 0.5).
         normalization (float, optional):
             Alpha for normalized gradient interpolation (default: 0.5).
         normalize_channels (bool, optional):
             Whether to perform channel-wise normalization (default: True).
+        amp_fac (float, optional):
+            Amplification factor for the first moment filter (default: 2.0).
         clip_lambda (Optional[Callable[[int], float]], optional):
-            Lambda function to compute gradient clipping threshold based on the step (default: lambda step: step**0.25).
-        decouple (bool, optional):
-            Whether to decouple weight decay from the gradient update (default: False).
-        maximize (bool, optional):
-            Whether to maximize the objective function (default: False).
-        capturable (bool, optional):
-            Whether the optimizer is capturable for CUDA graph support (default: False).
-        differentiable (bool, optional):
-            Whether the optimizer supports differentiable optimization (default: False).
-        fused (Optional[bool], optional):
-            Whether to use fused kernels for optimization (default: None).
+            Function to compute clipping threshold based on step (default: lambda step: step**0.25).
+        decouple_weight_decay (bool, optional):
+            Whether to use decoupled weight decay (default: False).
+        clip_gradients (bool, optional):
+            Whether to apply gradient clipping (default: False).
     """
 
     def __init__(
         self,
         params,
-        lr=1e-3,
-        betas=(0.9, 0.9999),
-        eps=1e-8,
-        amp_fac=2.0,
-        weight_decay=0.1,
-        centralization=0.5,
-        normalization=0.5,
-        normalize_channels=True,
+        lr: float = 1e-3,
+        betas: Tuple[float, float] = (0.9, 0.999),
+        eps: float = 1e-8,
+        weight_decay: float = 0.0,
+        centralization: float = 0.5,
+        normalization: float = 0.5,
+        normalize_channels: bool = True,
+        amp_fac: float = 2.0,
         clip_lambda: Optional[Callable[[int], float]] = lambda step: step**0.25,
-        decouple: bool = False,
-        maximize: bool = False,
-        capturable: bool = False,
-        differentiable: bool = False,
-        fused: Optional[bool] = None,
+        decouple_weight_decay: bool = False,
+        clip_gradients: bool = False,
     ):
-        if isinstance(lr, torch.Tensor):
-            if fused and not capturable:
-                raise ValueError(
-                    "lr as a Tensor is not supported for capturable=False and fused=True"
-                )
-            if lr.numel() != 1:
-                raise ValueError("Tensor lr must be a single element")
-        if not 0.0 <= lr:
-            raise ValueError(f"Invalid learning rate: {lr}")
-        if not 0.0 <= eps:
-            raise ValueError(f"Invalid epsilon value: {eps}")
-        if not 0.0 <= betas[0] < 1.0:
-            raise ValueError(f"Invalid beta parameter at index 0: {betas[0]}")
-        if not 0.0 <= betas[1] < 1.0:
-            raise ValueError(f"Invalid beta parameter at index 1: {betas[1]}")
-        if not 0.0 <= weight_decay:
-            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
-
-        self.amp_fac = amp_fac
-        self.clip_lambda = clip_lambda
-        self.decouple = decouple
-
         defaults = dict(
             lr=lr,
             betas=betas,
@@ -87,22 +56,12 @@ class SAVEUS(Optimizer):
             centralization=centralization,
             normalization=normalization,
             normalize_channels=normalize_channels,
-            decouple=decouple,
-            maximize=maximize,
-            capturable=capturable,
-            differentiable=differentiable,
-            fused=fused,
+            amp_fac=amp_fac,
+            clip_lambda=clip_lambda,
+            decouple_weight_decay=decouple_weight_decay,
+            clip_gradients=clip_gradients,
         )
         super(SAVEUS, self).__init__(params, defaults)
-
-    def __setstate__(self, state):
-        super().__setstate__(state)
-        for group in self.param_groups:
-            group.setdefault("maximize", False)
-            group.setdefault("decouple", False)
-            group.setdefault("capturable", False)
-            group.setdefault("differentiable", False)
-            group.setdefault("fused", None)
 
     def normalize_gradient(
         self,
@@ -112,12 +71,10 @@ class SAVEUS(Optimizer):
         epsilon: float = 1e-8,
     ) -> None:
         r"""Normalize gradient with standard deviation.
-        
-        Args:
-            x (torch.Tensor): Gradient tensor.
-            use_channels (bool): Whether to perform channel-wise normalization.
-            alpha (float): Interpolation factor between original and normalized gradient.
-            epsilon (float): Small value to prevent division by zero.
+        :param x: torch.Tensor. Gradient.
+        :param use_channels: bool. Channel-wise normalization.
+        :param alpha: float. Interpolation weight between original and normalized gradient.
+        :param epsilon: float. Small value to prevent division by zero.
         """
         size: int = x.dim()
         if size > 1 and use_channels:
@@ -127,21 +84,30 @@ class SAVEUS(Optimizer):
             s = x.std().add_(epsilon)
             x.lerp_(x.div_(s), weight=alpha)
 
-    def step(self, closure=None):
-        """Performs a single optimization step.
-
+    def step(self, closure: Optional[Callable] = None):
+        """Perform a single optimization step.
+        
         Args:
-            closure (Callable, optional): A closure that reevaluates the model
-                and returns the loss.
-
-        Returns:
-            loss: The loss evaluated by the closure, if provided.
+            closure (Callable, optional):
+                A closure that reevaluates the model and returns the loss.
         """
         loss = None
         if closure is not None:
             loss = closure()
 
         for group in self.param_groups:
+            lr = group["lr"]
+            betas = group["betas"]
+            eps = group["eps"]
+            weight_decay = group["weight_decay"]
+            centralization = group["centralization"]
+            normalization = group["normalization"]
+            normalize_channels = group["normalize_channels"]
+            amp_fac = group["amp_fac"]
+            clip_lambda = group["clip_lambda"]
+            decouple_weight_decay = group["decouple_weight_decay"]
+            clip_gradients = group["clip_gradients"]
+
             for p in group["params"]:
                 if p.grad is None:
                     continue
@@ -158,17 +124,10 @@ class SAVEUS(Optimizer):
                     state["ema_squared"] = torch.zeros_like(p.data)
 
                 ema, ema_squared = state["ema"], state["ema_squared"]
-                beta1, beta2 = group["betas"]
-                lr = group["lr"]
-                weight_decay = group["weight_decay"]
-                centralization = group["centralization"]
-                normalization = group["normalization"]
-                normalize_channels = group["normalize_channels"]
-                decouple = group["decouple"]
-                maximize = group["maximize"]
+                beta1, beta2 = betas
                 state["step"] += 1
 
-                # Center the gradient vector
+                # Center the gradient
                 if centralization != 0:
                     grad.sub_(
                         grad.mean(dim=tuple(range(1, grad.dim())), keepdim=True).mul_(centralization)
@@ -185,24 +144,27 @@ class SAVEUS(Optimizer):
                 bias_correction_sqrt = (1 - beta2 ** state["step"]) ** 0.5
                 step_size = lr / bias_correction
 
-                # Decay the first and second moment running averages
+                # Update EMA of gradient
                 ema.mul_(beta1).add_(grad, alpha=1 - beta1)
-                grad.add_(ema, alpha=self.amp_fac)
+                # Amplify gradient with EMA
+                grad.add_(ema, alpha=amp_fac)
+                # Update EMA of squared gradient
                 ema_squared.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
 
-                denom = (ema_squared.sqrt() / bias_correction_sqrt).add_(group["eps"])
+                # Compute denominator
+                denom = ema_squared.sqrt().div_(bias_correction_sqrt).add_(eps)
 
-                if weight_decay != 0:
-                    if decouple:
-                        p.data.mul_(1 - lr * weight_decay)
-                    else:
-                        grad = grad.add(p.data, alpha=weight_decay)
+                if decouple_weight_decay and weight_decay != 0:
+                    p.data.mul_(1 - step_size * weight_decay)
+                elif weight_decay != 0:
+                    grad.add_(p.data, alpha=weight_decay)
 
-                # Gradient clipping
-                if self.clip_lambda is not None:
-                    clip = self.clip_lambda(state["step"])
+                # Apply gradient clipping if enabled
+                if clip_gradients and clip_lambda is not None:
+                    clip = clip_lambda(state["step"])
                     grad.clamp_(-clip, clip)
 
+                # Update parameters
                 p.data.addcdiv_(grad, denom, value=-step_size)
 
         return loss
