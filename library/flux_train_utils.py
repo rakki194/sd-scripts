@@ -56,47 +56,30 @@ def sample_images(
                 return
 
     logger.info(f"generating sample images at step: {steps}")
-    if not os.path.isfile(args.sample_prompts):
+    if not os.path.isfile(args.sample_prompts) and sample_prompts_te_outputs is None:
         logger.error(f"No prompt file: {args.sample_prompts}")
         return
 
-    # Load prompts first
-    prompts = train_util.load_prompts(args.sample_prompts)
-    
-    # Filter out empty prompts
-    prompts = [p for p in prompts if p.get("prompt", "").strip()]
-    if not prompts:
-        logger.error("No valid prompts found in prompt file")
-        return
+    distributed_state = PartialState()  # for multi gpu distributed inference. this is a singleton, so it's safe to use it here
 
-    distributed_state = PartialState()
+    # unwrap unet and text_encoder(s)
     flux = accelerator.unwrap_model(flux)
     if text_encoders is not None:
         text_encoders = [accelerator.unwrap_model(te) for te in text_encoders]
+    # print([(te.parameters().__next__().device if te is not None else None) for te in text_encoders])
 
-    # Check if we need to update cached outputs (either first time or prompts changed)
-    need_cache_update = False
-    if sample_prompts_te_outputs is None:
+    # Cache text encoder outputs for sample prompts if not already cached
+    if sample_prompts_te_outputs is None and args.cache_text_encoder_outputs:
         sample_prompts_te_outputs = {}
-        need_cache_update = True
-    else:
-        # Check if any new prompts aren't in the cache
-        for prompt_dict in prompts:
-            prompt = prompt_dict.get("prompt", "").strip()
-            if prompt and prompt not in sample_prompts_te_outputs:
-                need_cache_update = True
-                break
-
-    # Cache or update text encoder outputs if needed
-    if need_cache_update and args.cache_text_encoder_outputs:
+        prompts = train_util.load_prompts(args.sample_prompts)
         tokenize_strategy = strategy_base.TokenizeStrategy.get_strategy()
         encoding_strategy = strategy_base.TextEncodingStrategy.get_strategy()
 
         logger.info("Caching text encoder outputs for sample prompts...")
         with torch.no_grad(), accelerator.autocast():
             for prompt_dict in prompts:
-                prompt = prompt_dict.get("prompt", "").strip()
-                if prompt and prompt not in sample_prompts_te_outputs:
+                prompt = prompt_dict.get("prompt", "")
+                if prompt not in sample_prompts_te_outputs:
                     tokens_and_masks = tokenize_strategy.tokenize(prompt)
                     text_encoder_conds = encoding_strategy.encode_tokens(
                         tokenize_strategy, 
@@ -185,10 +168,7 @@ def sample_image_inference(
     height = prompt_dict.get("height", 512)
     scale = prompt_dict.get("scale", 3.5)
     seed = prompt_dict.get("seed")
-    prompt = prompt_dict.get("prompt", "").strip()
-    if not prompt:
-        logger.warning("Skipping empty prompt")
-        return
+    prompt: str = prompt_dict.get("prompt", "")
 
     if prompt_replacement is not None:
         prompt = prompt.replace(prompt_replacement[0], prompt_replacement[1])
@@ -206,25 +186,11 @@ def sample_image_inference(
     logger.info(f"prompt: {prompt}")
     logger.info(f"height: {height} width: {width} sample_steps: {sample_steps} scale: {scale}{f' seed: {seed}' if seed is not None else ''}")
 
+    # Get text encoder outputs from cache
     if not sample_prompts_te_outputs or prompt not in sample_prompts_te_outputs:
-        # If caching is disabled or prompt not found, generate the encodings on the fly
-        if not args.cache_text_encoder_outputs:
-            logger.info(f"Generating text encoder outputs for prompt: {prompt}")
-            tokenize_strategy = strategy_base.TokenizeStrategy.get_strategy()
-            encoding_strategy = strategy_base.TextEncodingStrategy.get_strategy()
-            with torch.no_grad(), accelerator.autocast():
-                tokens_and_masks = tokenize_strategy.tokenize(prompt)
-                text_encoder_conds = encoding_strategy.encode_tokens(
-                    tokenize_strategy, 
-                    text_encoders, 
-                    tokens_and_masks,
-                    args.apply_t5_attn_mask
-                )
-        else:
-            raise ValueError(f"No cached text encoder outputs found for prompt: {prompt}")
-    else:
-        text_encoder_conds = sample_prompts_te_outputs[prompt]
-
+        raise ValueError(f"No cached text encoder outputs found for prompt: {prompt}")
+    
+    text_encoder_conds = sample_prompts_te_outputs[prompt]
     l_pooled, t5_out, txt_ids, t5_attn_mask = text_encoder_conds
 
     # sample image
