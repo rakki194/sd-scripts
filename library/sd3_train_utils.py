@@ -1,10 +1,8 @@
 import argparse
 import math
 import os
-import toml
-import json
 import time
-from typing import Dict, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import torch
 from safetensors.torch import save_file
@@ -17,10 +15,6 @@ from library.device_utils import init_ipex, clean_memory_on_device
 
 init_ipex()
 
-# from transformers import CLIPTokenizer
-# from library import model_util
-# , sdxl_model_util, train_util, sdxl_original_unet
-# from library.sdxl_lpw_stable_diffusion import SdxlStableDiffusionLongPromptWeightingPipeline
 from .utils import setup_logging
 
 setup_logging()
@@ -105,8 +99,8 @@ def save_sd3_model_on_train_end(
     train_util.save_sd_model_on_train_end_common(args, True, True, epoch, global_step, sd_saver, None)
 
 
-# epochとstepの保存、メタデータにepoch/stepが含まれ引数が同じになるため、統合している
-# on_epoch_end: Trueならepoch終了時、Falseならstep経過時
+# saving epoch and step, integrated since metadata contains epoch/step and arguments are the same
+# on_epoch_end: True for end of epoch, False for step interval
 def save_sd3_model_on_epoch_end_or_stepwise(
     args: argparse.Namespace,
     on_epoch_end: bool,
@@ -250,7 +244,7 @@ def verify_sdxl_training_args(args: argparse.Namespace, supportTextEncoderCachin
 
     # if args.multires_noise_iterations:
     #     logger.info(
-    #         f"Warning: SDXL has been trained with noise_offset={DEFAULT_NOISE_OFFSET}, but noise_offset is disabled due to multires_noise_iterations / SDXLはnoise_offset={DEFAULT_NOISE_OFFSET}で学習されていますが、multires_noise_iterationsが有効になっているためnoise_offsetは無効になります"
+    #         f"Warning: SDXL has been trained with noise_offset={DEFAULT_NOISE_OFFSET}, but noise_offset is disabled due to multires_noise_iterations"
     #     )
     # else:
     #     if args.noise_offset is None:

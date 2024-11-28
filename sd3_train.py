@@ -18,8 +18,6 @@ from accelerate.utils import set_seed
 from library import deepspeed_utils, sd3_models, sd3_train_utils, sd3_utils, strategy_base, strategy_sd3
 from library.sdxl_train_util import match_mixed_precision
 
-# , sdxl_model_util
-
 import library.train_util as train_util
 
 from library.utils import setup_logging, add_logging_arguments
@@ -31,22 +29,11 @@ logger = logging.getLogger(__name__)
 
 import library.config_util as config_util
 
-# import library.sdxl_train_util as sdxl_train_util
 from library.config_util import (
     ConfigSanitizer,
     BlueprintGenerator,
 )
 from library.custom_train_functions import apply_masked_loss, add_custom_train_arguments
-
-# from library.custom_train_functions import (
-#     apply_snr_weight,
-#     prepare_scheduler_for_custom_training,
-#     scale_v_prediction_loss_like_noise_prediction,
-#     add_v_prediction_like_loss,
-#     apply_debiased_estimation,
-#     apply_masked_loss,
-# )
-
 
 def train(args):
     train_util.verify_training_args(args)

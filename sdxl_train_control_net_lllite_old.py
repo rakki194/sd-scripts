@@ -1,11 +1,8 @@
 import argparse
-import json
 import math
 import os
 import random
-import time
 from multiprocessing import Value
-from types import SimpleNamespace
 import toml
 
 from tqdm import tqdm
@@ -14,13 +11,10 @@ import torch
 from library.device_utils import init_ipex, clean_memory_on_device
 init_ipex()
 
-from torch.nn.parallel import DistributedDataParallel as DDP
 from accelerate.utils import set_seed
-from diffusers import DDPMScheduler, ControlNetModel
-from safetensors.torch import load_file
-from library import deepspeed_utils, sai_model_spec, sdxl_model_util, sdxl_original_unet, sdxl_train_util
+from diffusers import DDPMScheduler
+from library import deepspeed_utils, sai_model_spec, sdxl_model_util, sdxl_train_util
 
-import library.model_util as model_util
 import library.train_util as train_util
 import library.config_util as config_util
 from library.config_util import (
@@ -33,8 +27,6 @@ from library.custom_train_functions import (
     add_v_prediction_like_loss,
     apply_snr_weight,
     prepare_scheduler_for_custom_training,
-    pyramid_noise_like,
-    apply_noise_offset,
     scale_v_prediction_loss_like_noise_prediction,
     apply_debiased_estimation,
 )
@@ -47,7 +39,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-# TODO 他のスクリプトと共通化する
+# TODO unify with other scripts
 def generate_step_logs(args: argparse.Namespace, current_loss, avr_loss, lr_scheduler):
     logs = {
         "loss/current": current_loss,
@@ -76,7 +68,7 @@ def train(args):
 
     tokenizer1, tokenizer2 = sdxl_train_util.load_tokenizers(args)
 
-    # データセットを準備する
+    # prepare dataset
     blueprint_generator = BlueprintGenerator(ConfigSanitizer(False, False, True, True))
     if use_user_config:
         logger.info(f"Load dataset config from {args.dataset_config}")
@@ -84,7 +76,7 @@ def train(args):
         ignored = ["train_data_dir", "conditioning_data_dir"]
         if any(getattr(args, attr) is not None for attr in ignored):
             logger.warning(
-                "ignore following options because config file is found: {0} / 設定ファイルが利用されるため以下のオプションは無視されます: {0}".format(
+                "ignore following options because config file is found: {0}".format(
                     ", ".join(ignored)
                 )
             )
@@ -116,17 +108,17 @@ def train(args):
         return
     if len(train_dataset_group) == 0:
         logger.error(
-            "No data found. Please verify arguments (train_data_dir must be the parent of folders with images) / 画像がありません。引数指定を確認してください（train_data_dirには画像があるフォルダではなく、画像があるフォルダの親フォルダを指定する必要があります）"
+            "No data found. Please verify arguments (train_data_dir must be the parent of folders with images)"
         )
         return
 
     if cache_latents:
         assert (
             train_dataset_group.is_latent_cacheable()
-        ), "when caching latents, either color_aug or random_crop cannot be used / latentをキャッシュするときはcolor_augとrandom_cropは使えません"
+        ), "when caching latents, either color_aug or random_crop cannot be used"
     else:
         logger.warning(
-            "WARNING: random_crop is not supported yet for ControlNet training / ControlNetの学習ではrandom_cropはまだサポートされていません"
+            "WARNING: random_crop is not supported yet for ControlNet training"
         )
 
     if args.cache_text_encoder_outputs:
@@ -134,16 +126,16 @@ def train(args):
             train_dataset_group.is_text_encoder_output_cacheable()
         ), "when caching Text Encoder output, either caption_dropout_rate, shuffle_caption, token_warmup_step or caption_tag_dropout_rate cannot be used / Text Encoderの出力をキャッシュするときはcaption_dropout_rate, shuffle_caption, token_warmup_step, caption_tag_dropout_rateは使えません"
 
-    # acceleratorを準備する
+    # prepare accelerator
     logger.info("prepare accelerator")
     accelerator = train_util.prepare_accelerator(args)
     is_main_process = accelerator.is_main_process
 
-    # mixed precisionに対応した型を用意しておき適宜castする
+    # prepare dtype for mixed precision
     weight_dtype, save_dtype = train_util.prepare_dtype(args)
     vae_dtype = torch.float32 if args.no_half_vae else weight_dtype
 
-    # モデルを読み込む
+    # load the model
     (
         load_stable_diffusion_format,
         text_encoder1,
@@ -154,10 +146,10 @@ def train(args):
         ckpt_info,
     ) = sdxl_train_util.load_target_model(args, accelerator, sdxl_model_util.MODEL_VERSION_SDXL_BASE_V1_0, weight_dtype)
 
-    # モデルに xformers とか memory efficient attention を組み込む
+    # integrate xformers and/or memory efficient attention into the model
     train_util.replace_unet_modules(unet, args.mem_eff_attn, args.xformers, args.sdpa)
 
-    # 学習を準備する
+    # prepare VAE for caching latents
     if cache_latents:
         vae.to(accelerator.device, dtype=vae_dtype)
         vae.requires_grad_(False)
@@ -174,7 +166,7 @@ def train(args):
 
         accelerator.wait_for_everyone()
 
-    # TextEncoderの出力をキャッシュする
+    # Cache the Text Encoder outputs
     if args.cache_text_encoder_outputs:
         # Text Encodes are eval and no grad
         with torch.no_grad():
@@ -200,7 +192,7 @@ def train(args):
         unet.enable_gradient_checkpointing()
         network.enable_gradient_checkpointing()  # may have no effect
 
-    # 学習に必要なクラスを準備する
+    # prepare optimizer, data loader etc.
     accelerator.print("prepare optimizer, data loader etc.")
 
     trainable_params = list(network.prepare_optimizer_params())
@@ -209,8 +201,8 @@ def train(args):
 
     _, _, optimizer = train_util.get_optimizer(args, trainable_params)
 
-    # dataloaderを準備する
-    # DataLoaderのプロセス数：0 は persistent_workers が使えないので注意
+    # prepare dataloader
+    # number of DataLoader workers: 0 means persistent_workers cannot be used
     n_workers = min(args.max_data_loader_n_workers, os.cpu_count())  # cpu_count or max_data_loader_n_workers
 
     train_dataloader = torch.utils.data.DataLoader(
@@ -222,51 +214,51 @@ def train(args):
         persistent_workers=args.persistent_data_loader_workers,
     )
 
-    # 学習ステップ数を計算する
+    # calculate steps for training
     if args.max_train_epochs is not None:
         args.max_train_steps = args.max_train_epochs * math.ceil(
             len(train_dataloader) / accelerator.num_processes / args.gradient_accumulation_steps
         )
         accelerator.print(
-            f"override steps. steps for {args.max_train_epochs} epochs is / 指定エポックまでのステップ数: {args.max_train_steps}"
+            f"override steps. steps for {args.max_train_epochs} epochs is: {args.max_train_steps}"
         )
 
-    # データセット側にも学習ステップを送信
+    # send learning steps to dataset side
     train_dataset_group.set_max_train_steps(args.max_train_steps)
 
     # lr schedulerを用意する
     lr_scheduler = train_util.get_scheduler_fix(args, optimizer, accelerator.num_processes)
 
-    # 実験的機能：勾配も含めたfp16/bf16学習を行う　モデル全体をfp16/bf16にする
+    # experimental feature: enable fp16/bf16 training with gradient also
     if args.full_fp16:
         assert (
             args.mixed_precision == "fp16"
-        ), "full_fp16 requires mixed precision='fp16' / full_fp16を使う場合はmixed_precision='fp16'を指定してください。"
+        ), "full_fp16 requires mixed precision='fp16'"
         accelerator.print("enable full fp16 training.")
         unet.to(weight_dtype)
         network.to(weight_dtype)
     elif args.full_bf16:
         assert (
             args.mixed_precision == "bf16"
-        ), "full_bf16 requires mixed precision='bf16' / full_bf16を使う場合はmixed_precision='bf16'を指定してください。"
+        ), "full_bf16 requires mixed precision='bf16'"
         accelerator.print("enable full bf16 training.")
         unet.to(weight_dtype)
         network.to(weight_dtype)
 
-    # acceleratorがなんかよろしくやってくれるらしい
+    # accelerator will do something
     unet, network, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         unet, network, optimizer, train_dataloader, lr_scheduler
     )
     network: control_net_lllite.ControlNetLLLite
 
     if args.gradient_checkpointing:
-        unet.train()  # according to TI example in Diffusers, train is required -> これオリジナルのU-Netしたので本当は外せる
+        unet.train()  # according to TI example in Diffusers, train is required -> this is actually not needed
     else:
         unet.eval()
 
     network.prepare_grad_etc()
 
-    # TextEncoderの出力をキャッシュするときにはCPUへ移動する
+    # when caching Text Encoder outputs, move them to CPU
     if args.cache_text_encoder_outputs:
         # move Text Encoders for sampling images. Text Encoder doesn't work on CPU with fp16
         text_encoder1.to("cpu", dtype=torch.float32)
@@ -282,32 +274,29 @@ def train(args):
         vae.eval()
         vae.to(accelerator.device, dtype=vae_dtype)
 
-    # 実験的機能：勾配も含めたfp16学習を行う　PyTorchにパッチを当ててfp16でのgrad scaleを有効にする
+    # experimental feature: enable fp16 training with gradient also
     if args.full_fp16:
         train_util.patch_accelerator_for_fp16_training(accelerator)
 
     # resumeする
     train_util.resume_from_local_or_hf_if_specified(accelerator, args)
 
-    # epoch数を計算する
+    # calculate epoch number
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
     if (args.save_n_epoch_ratio is not None) and (args.save_n_epoch_ratio > 0):
         args.save_every_n_epochs = math.floor(num_train_epochs / args.save_n_epoch_ratio) or 1
 
-    # 学習する
+    # start training
     # TODO: find a way to handle total batch size when there are multiple datasets
-    accelerator.print("running training / 学習開始")
-    accelerator.print(f"  num train images * repeats / 学習画像の数×繰り返し回数: {train_dataset_group.num_train_images}")
-    accelerator.print(f"  num reg images / 正則化画像の数: {train_dataset_group.num_reg_images}")
-    accelerator.print(f"  num batches per epoch / 1epochのバッチ数: {len(train_dataloader)}")
-    accelerator.print(f"  num epochs / epoch数: {num_train_epochs}")
-    accelerator.print(
-        f"  batch size per device / バッチサイズ: {', '.join([str(d.batch_size) for d in train_dataset_group.datasets])}"
-    )
-    # logger.info(f"  total train batch size (with parallel & distributed & accumulation) / 総バッチサイズ（並列学習、勾配合計含む）: {total_batch_size}")
-    accelerator.print(f"  gradient accumulation steps / 勾配を合計するステップ数 = {args.gradient_accumulation_steps}")
-    accelerator.print(f"  total optimization steps / 学習ステップ数: {args.max_train_steps}")
+    accelerator.print("running training")
+    accelerator.print(f"  num train images * repeats: {train_dataset_group.num_train_images}")
+    accelerator.print(f"  num reg images: {train_dataset_group.num_reg_images}")
+    accelerator.print(f"  num batches per epoch: {len(train_dataloader)}")
+    accelerator.print(f"  num epochs: {num_train_epochs}")
+    accelerator.print(f"  batch size per device: {', '.join([str(d.batch_size) for d in train_dataset_group.datasets])}")
+    accelerator.print(f"  gradient accumulation steps: {args.gradient_accumulation_steps}")
+    accelerator.print(f"  total optimization steps: {args.max_train_steps}")
 
     progress_bar = tqdm(range(args.max_train_steps), smoothing=0, disable=not accelerator.is_local_main_process, desc="steps")
     global_step = 0
@@ -363,10 +352,10 @@ def train(args):
                     if "latents" in batch and batch["latents"] is not None:
                         latents = batch["latents"].to(accelerator.device).to(dtype=weight_dtype)
                     else:
-                        # latentに変換
+                        # convert to latent representation
                         latents = vae.encode(batch["images"].to(dtype=vae_dtype)).latent_dist.sample().to(dtype=weight_dtype)
 
-                        # NaNが含まれていれば警告を表示し0に置き換える
+                        # if NaN is found, print a warning and replace with zeros
                         if torch.any(torch.isnan(latents)):
                             accelerator.print("NaN found in latents, replacing with zeros")
                             latents = torch.nan_to_num(latents, 0, out=latents)
@@ -413,11 +402,11 @@ def train(args):
                 controlnet_image = batch["conditioning_images"].to(dtype=weight_dtype)
 
                 with accelerator.autocast():
-                    # conditioning imageをControlNetに渡す / pass conditioning image to ControlNet
-                    # 内部でcond_embに変換される / it will be converted to cond_emb inside
+                    # pass conditioning image to ControlNet
+                    # it will be converted to cond_emb inside
                     network.set_cond_image(controlnet_image)
 
-                    # それらの値を使いつつ、U-Netでノイズを予測する / predict noise with U-Net using those values
+                    # predict noise with U-Net using those values
                     noise_pred = unet(noisy_latents, timesteps, text_embedding, vector_embedding)
 
                 if args.v_parameterization:
@@ -429,7 +418,7 @@ def train(args):
                 loss = train_util.conditional_loss(noise_pred.float(), target.float(), reduction="none", loss_type=args.loss_type, huber_c=huber_c)
                 loss = loss.mean([1, 2, 3])
 
-                loss_weights = batch["loss_weights"]  # 各sampleごとのweight
+                loss_weights = batch["loss_weights"]  # loss weights for each sample
                 loss = loss * loss_weights
 
                 if args.min_snr_gamma:
@@ -441,7 +430,7 @@ def train(args):
                 if args.debiased_estimation_loss:
                     loss = apply_debiased_estimation(loss, timesteps, noise_scheduler, args.v_parameterization)
 
-                loss = loss.mean()  # 平均なのでbatch_sizeで割る必要なし
+                loss = loss.mean()  # no need to divide by batch_size
 
                 accelerator.backward(loss)
                 if accelerator.sync_gradients and args.max_grad_norm != 0.0:
@@ -459,7 +448,7 @@ def train(args):
 
                 # sdxl_train_util.sample_images(accelerator, args, None, global_step, accelerator.device, vae, tokenizer, text_encoder, unet)
 
-                # 指定ステップごとにモデルを保存
+                # save model at specified steps
                 if args.save_every_n_steps is not None and global_step % args.save_every_n_steps == 0:
                     accelerator.wait_for_everyone()
                     if accelerator.is_main_process:
@@ -493,7 +482,7 @@ def train(args):
 
         accelerator.wait_for_everyone()
 
-        # 指定エポックごとにモデルを保存
+        # save model at specified epochs
         if args.save_every_n_epochs is not None:
             saving = (epoch + 1) % args.save_every_n_epochs == 0 and (epoch + 1) < num_train_epochs
             if is_main_process and saving:
@@ -545,31 +534,31 @@ def setup_parser() -> argparse.ArgumentParser:
         type=str,
         default="safetensors",
         choices=[None, "ckpt", "pt", "safetensors"],
-        help="format to save the model (default is .safetensors) / モデル保存時の形式（デフォルトはsafetensors）",
+        help="format to save the model (default is .safetensors)",
     )
     parser.add_argument(
-        "--cond_emb_dim", type=int, default=None, help="conditioning embedding dimension / 条件付け埋め込みの次元数"
+        "--cond_emb_dim", type=int, default=None, help="conditioning embedding dimension"
     )
     parser.add_argument(
-        "--network_weights", type=str, default=None, help="pretrained weights for network / 学習するネットワークの初期重み"
+        "--network_weights", type=str, default=None, help="pretrained weights for network"
     )
-    parser.add_argument("--network_dim", type=int, default=None, help="network dimensions (rank) / モジュールの次元数")
+    parser.add_argument("--network_dim", type=int, default=None, help="network dimensions (rank)")
     parser.add_argument(
         "--network_dropout",
         type=float,
         default=None,
-        help="Drops neurons out of training every step (0 or None is default behavior (no dropout), 1 would drop all neurons) / 訓練時に毎ステップでニューロンをdropする（0またはNoneはdropoutなし、1は全ニューロンをdropout）",
+        help="Drops neurons out of training every step (0 or None is default behavior (no dropout), 1 would drop all neurons)",
     )
     parser.add_argument(
         "--conditioning_data_dir",
         type=str,
         default=None,
-        help="conditioning data directory / 条件付けデータのディレクトリ",
+        help="conditioning data directory",
     )
     parser.add_argument(
         "--no_half_vae",
         action="store_true",
-        help="do not use fp16/bf16 VAE in mixed precision (use float VAE) / mixed precisionでも fp16/bf16 VAEを使わずfloat VAEを使う",
+        help="do not use fp16/bf16 VAE in mixed precision (use float VAE)",
     )
     return parser
 
