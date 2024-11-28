@@ -569,7 +569,10 @@ def sample_image_inference(
     # but adding 'enum' to the filename should be enough
 
     ts_str = time.strftime("%Y%m%d%H%M%S", time.localtime())
-    num_suffix = f"e{epoch:06d}" if epoch is not None else f"{steps:06d}"
+    if steps == 0:
+        num_suffix = "000000"  # Remove the 'e' prefix for initial samples
+    else:
+        num_suffix = f"e{epoch:06d}" if epoch is not None else f"{steps:06d}"
     seed_suffix = "" if seed is None else f"_{seed}"
     i: int = prompt_dict["enum"]
     img_filename = f"{'' if args.output_name is None else args.output_name + '_'}{num_suffix}_{i:02d}_{ts_str}{seed_suffix}.png"
