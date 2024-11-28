@@ -280,8 +280,11 @@ class Sd3NetworkTrainer(train_network.NetworkTrainer):
         text_encoders = text_encoder  # for compatibility
         text_encoders = self.get_models_for_text_encoding(args, accelerator, text_encoders)
 
+        # Pass steps=0 for initial samples, otherwise pass global_step
+        steps = 0 if global_step == 0 else global_step
+        
         sd3_train_utils.sample_images(
-            accelerator, args, epoch, global_step, mmdit, vae, text_encoders, self.sample_prompts_te_outputs
+            accelerator, args, epoch, steps, mmdit, vae, text_encoders, self.sample_prompts_te_outputs
         )
 
     def get_noise_scheduler(self, args: argparse.Namespace, device: torch.device) -> Any:
