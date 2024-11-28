@@ -1,8 +1,6 @@
 import argparse
-import copy
 import math
-import random
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from accelerate import Accelerator
@@ -11,7 +9,7 @@ from library.device_utils import init_ipex, clean_memory_on_device
 
 init_ipex()
 
-from library import flux_models, flux_train_utils, flux_utils, sd3_train_utils, sd3_utils, strategy_base, strategy_sd3, train_util
+from library import flux_models, flux_utils, sd3_train_utils, sd3_utils, strategy_base, strategy_sd3, train_util
 import train_network
 from library.utils import setup_logging
 
@@ -35,25 +33,25 @@ class Sd3NetworkTrainer(train_network.NetworkTrainer):
 
         if args.cache_text_encoder_outputs_to_disk and not args.cache_text_encoder_outputs:
             logger.warning(
-                "cache_text_encoder_outputs_to_disk is enabled, so cache_text_encoder_outputs is also enabled / cache_text_encoder_outputs_to_diskが有効になっているため、cache_text_encoder_outputsも有効になります"
+                "cache_text_encoder_outputs_to_disk is enabled, so cache_text_encoder_outputs is also enabled."
             )
             args.cache_text_encoder_outputs = True
 
         if args.cache_text_encoder_outputs:
             assert (
                 train_dataset_group.is_text_encoder_output_cacheable()
-            ), "when caching Text Encoder output, either caption_dropout_rate, shuffle_caption, token_warmup_step or caption_tag_dropout_rate cannot be used / Text Encoderの出力をキャッシュするときはcaption_dropout_rate, shuffle_caption, token_warmup_step, caption_tag_dropout_rateは使えません"
+            ), "when caching Text Encoder output, either caption_dropout_rate, shuffle_caption, token_warmup_step or caption_tag_dropout_rate cannot be used."
 
         # prepare CLIP-L/CLIP-G/T5XXL training flags
         self.train_clip = not args.network_train_unet_only
         self.train_t5xxl = False  # default is False even if args.network_train_unet_only is False
 
         if args.max_token_length is not None:
-            logger.warning("max_token_length is not used in Flux training / max_token_lengthはFluxのトレーニングでは使用されません")
+            logger.warning("max_token_length is not used in Flux training.")
 
         assert (
             args.blocks_to_swap is None or args.blocks_to_swap == 0
-        ) or not args.cpu_offload_checkpointing, "blocks_to_swap is not supported with cpu_offload_checkpointing / blocks_to_swapはcpu_offload_checkpointingと併用できません"
+        ) or not args.cpu_offload_checkpointing, "blocks_to_swap is not supported with cpu_offload_checkpointing."
 
         train_dataset_group.verify_bucket_reso_steps(32)  # TODO check this
 
@@ -90,7 +88,6 @@ class Sd3NetworkTrainer(train_network.NetworkTrainer):
             else:
                 logger.info(
                     "Cast SD3 model to fp8. This may take a while. You can reduce the time by using fp8 checkpoint."
-                    " / SD3モデルをfp8に変換しています。これには時間がかかる場合があります。fp8チェックポイントを使用することで時間を短縮できます。"
                 )
                 mmdit.to(torch.float8_e4m3fn)
         self.is_swapping_blocks = args.blocks_to_swap is not None and args.blocks_to_swap > 0
@@ -159,9 +156,7 @@ class Sd3NetworkTrainer(train_network.NetworkTrainer):
         self.train_t5xxl = network.train_t5xxl
 
         if self.train_t5xxl and args.cache_text_encoder_outputs:
-            raise ValueError(
-                "T5XXL is trained, so cache_text_encoder_outputs cannot be used / T5XXL学習時はcache_text_encoder_outputsは使用できません"
-            )
+            raise ValueError("T5XXL is trained, so cache_text_encoder_outputs cannot be used.")
 
     def get_models_for_text_encoding(self, args, accelerator, text_encoders):
         if args.cache_text_encoder_outputs:
