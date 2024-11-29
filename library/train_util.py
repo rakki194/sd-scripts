@@ -4858,6 +4858,46 @@ def get_optimizer(args, trainable_params):
             raise ImportError("Importing SAVEUS failed")
         optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
+    elif optimizer_type == "DOPE".lower():
+        logger.info(f"use DOPE optimizer | {optimizer_kwargs}")
+        try:
+            from library.optimizers.dope import DOPE
+
+            optimizer_class = DOPE
+        except ImportError:
+            raise ImportError("Importing DOPE failed")
+        optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
+
+    elif optimizer_type == "ExMachina".lower():
+        logger.info(f"use ExMachina optimizer | {optimizer_kwargs}")
+        try:
+            from library.optimizers.exmachina import ExMachina
+
+            optimizer_class = ExMachina
+        except ImportError:
+            raise ImportError("Importing ExMachina failed")
+        optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
+
+    elif optimizer_type == "ExMachina".lower():
+        logger.info(f"use ExMachina optimizer | {optimizer_kwargs}")
+        try:
+            from library.optimizers.exmachina import ExMachina
+
+            optimizer_class = ExMachina
+        except ImportError:
+            raise ImportError("Importing ExMachina failed")
+        optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
+
+    elif optimizer_type == "ExMachina".lower():
+        logger.info(f"use ExMachina optimizer | {optimizer_kwargs}")
+        try:
+            from library.optimizers.exmachina import ExMachina
+
+            optimizer_class = ExMachina
+        except ImportError:
+            raise ImportError("Importing ExMachina failed")
+        optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
+
     elif optimizer_type == "ClybW".lower():
         logger.info(f"use ClybW optimizer | {optimizer_kwargs}")
         try:

@@ -6,31 +6,63 @@ class SAVEUS(Optimizer):
     r"""
     Implements the SAVEUS optimization algorithm, incorporating techniques from ADOPT.
     
+    The optimizer combines several advanced optimization techniques:
+    1. Gradient Centralization: Removes the mean of gradients for each layer, helping with
+       optimization stability and generalization (controlled by centralization parameter).
+    
+    2. Adaptive Gradient Normalization: Normalizes gradients using their standard deviation,
+       either channel-wise or globally, interpolating between original and normalized gradients
+       (controlled by normalization parameter).
+    
+    3. Momentum with Amplification: Uses exponential moving average (EMA) of gradients and
+       amplifies the current gradient using this history (controlled by amp_fac parameter).
+       - First moment: m_t = β₁ * m_{t-1} + (1 - β₁) * g_t
+       - Amplified gradient: g_t = g_t + amp_fac * m_t
+    
+    4. Adaptive Step Sizes: Similar to Adam, maintains second-order moment statistics for
+       adaptive learning rates:
+       - Second moment: v_t = β₂ * v_{t-1} + (1 - β₂) * g_t²
+       - Bias correction: m̂_t = m_t / (1 - β₁ᵗ), v̂_t = v_t / (1 - β₂ᵗ)
+       - Step size: η_t = lr / (√v̂_t + ε)
+    
+    5. Optional Features:
+       - Gradient Clipping: Clips gradients based on step-dependent threshold
+       - Decoupled Weight Decay: Applies L2 regularization directly to weights instead of gradients
+    
+    Update Rule (simplified):
+    θ_t = θ_{t-1} - η_t * g_t / √v̂_t
+
+    Where:
+    - θ_t: Parameters at step t
+    - η_t: Learning rate with bias correction
+    - g_t: Gradient (after centralization, normalization, and amplification)
+    - v̂_t: Bias-corrected second moment estimate
+    
     Arguments:
         params (iterable):
             Iterable of parameters to optimize or dicts defining parameter groups.
         lr (float, optional):
             Learning rate (default: 1e-3).
         betas (Tuple[float, float], optional):
-            Coefficients used for computing running averages of gradient and its square (default: (0.9, 0.999)).
+            Coefficients for computing running averages of gradient (β₁) and its square (β₂) (default: (0.9, 0.999)).
         eps (float, optional):
             Term added to the denominator to improve numerical stability (default: 1e-8).
         weight_decay (float, optional):
             Weight decay (L2 penalty) (default: 0).
         centralization (float, optional):
-            Center model gradients (default: 0.5).
+            Strength of gradient centralization (default: 0.5).
         normalization (float, optional):
-            Alpha for normalized gradient interpolation (default: 0.5).
+            Interpolation factor for normalized gradients (default: 0.5).
         normalize_channels (bool, optional):
-            Whether to perform channel-wise normalization (default: True).
+            Whether to normalize gradients channel-wise (default: True).
         amp_fac (float, optional):
-            Amplification factor for the first moment filter (default: 2.0).
+            Amplification factor for the momentum term (default: 2.0).
         clip_lambda (Optional[Callable[[int], float]], optional):
-            Function to compute clipping threshold based on step (default: lambda step: step**0.25).
+            Function computing gradient clipping threshold from step number (default: step**0.25).
         decouple_weight_decay (bool, optional):
-            Whether to use decoupled weight decay (default: False).
+            Whether to apply weight decay directly to weights (default: False).
         clip_gradients (bool, optional):
-            Whether to apply gradient clipping (default: False).
+            Whether to enable gradient clipping (default: False).
     """
 
     def __init__(
