@@ -7,36 +7,38 @@ class SAVEUS(Optimizer):
     Implements the SAVEUS optimization algorithm, incorporating techniques from ADOPT.
     
     The optimizer combines several advanced optimization techniques:
-    1. Gradient Centralization: Removes the mean of gradients for each layer, helping with
-       optimization stability and generalization (controlled by centralization parameter).
+    1. Gradient Centralization: Removes the mean of gradients for each layer:
+       g_t = g_t - mean(g_t)
     
-    2. Adaptive Gradient Normalization: Normalizes gradients using their standard deviation,
-       either channel-wise or globally, interpolating between original and normalized gradients
-       (controlled by normalization parameter).
+    2. Adaptive Gradient Normalization: Normalizes gradients using their standard deviation:
+       g_t = (1 - α) * g_t + α * (g_t / std(g_t))
+       where α is the normalization parameter
     
-    3. Momentum with Amplification: Uses exponential moving average (EMA) of gradients and
-       amplifies the current gradient using this history (controlled by amp_fac parameter).
+    3. Momentum with Amplification: 
        - First moment: m_t = β₁ * m_{t-1} + (1 - β₁) * g_t
        - Amplified gradient: g_t = g_t + amp_fac * m_t
+       where β₁ is the first moment decay rate
     
-    4. Adaptive Step Sizes: Similar to Adam, maintains second-order moment statistics for
-       adaptive learning rates:
+    4. Adaptive Step Sizes:
        - Second moment: v_t = β₂ * v_{t-1} + (1 - β₂) * g_t²
-       - Bias correction: m̂_t = m_t / (1 - β₁ᵗ), v̂_t = v_t / (1 - β₂ᵗ)
-       - Step size: η_t = lr / (√v̂_t + ε)
+       - Bias correction: m̂_t = m_t / (1 - β₁ᵗ)
+                         v̂_t = v_t / (1 - β₂ᵗ)
+       - Step size: η_t = lr / (1 - β₁ᵗ)
+       where β₂ is the second moment decay rate
     
-    5. Optional Features:
-       - Gradient Clipping: Clips gradients based on step-dependent threshold
-       - Decoupled Weight Decay: Applies L2 regularization directly to weights instead of gradients
-    
-    Update Rule (simplified):
-    θ_t = θ_{t-1} - η_t * g_t / √v̂_t
+    Complete Update Rule:
+    1. If decouple_weight_decay:
+       θ_t = θ_{t-1} * (1 - η_t * λ) - η_t * g_t / √(v̂_t + ε)
+    2. Otherwise:
+       θ_t = θ_{t-1} - η_t * (g_t + λ * θ_{t-1}) / √(v̂_t + ε)
 
     Where:
     - θ_t: Parameters at step t
     - η_t: Learning rate with bias correction
     - g_t: Gradient (after centralization, normalization, and amplification)
     - v̂_t: Bias-corrected second moment estimate
+    - λ: Weight decay coefficient
+    - ε: Small constant for numerical stability
     
     Arguments:
         params (iterable):
