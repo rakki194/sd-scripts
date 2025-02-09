@@ -1,0 +1,58 @@
+#!/usr/bin/env zsh
+
+NAME=eldritch
+
+python sdxl_train_network.py \
+    --pretrained_model_name_or_path=/home/kade/comfy/models/checkpoints/noobaiXLVpredv10.safetensors \
+    --train_data_dir="/home/kade/datasets/${NAME}" \
+    --output_dir="/home/kade/output_dir/noob-${NAME}-saveus-v1s1600" \
+    --output_name="noob-${NAME}-saveus-v1s1600" \
+    --resolution "1024,1024" \
+    --debiased_estimation_loss \
+    --max_token_length=225 \
+    --keep_tokens=1 \
+    --keep_tokens_separator="|||" \
+    --v_parameterization \
+    --zero_terminal_snr \
+    --log_with=tensorboard \
+    --seed=1728871242 \
+    --dataset_repeats=1 \
+    --enable_bucket \
+    --bucket_reso_steps=64 \
+    --min_bucket_reso=256 \
+    --max_bucket_reso=2048 \
+    --flip_aug \
+    --shuffle_caption \
+    --cache_latents \
+    --cache_latents_to_disk \
+    --max_data_loader_n_workers=8 \
+    --persistent_data_loader_workers \
+    --network_dim=100000 \
+    --network_alpha=64 \
+    --network_module="lycoris.kohya" \
+    --network_args "preset=full" "conv_dim=100000" "decompose_both=False" "conv_alpha=64" "rank_dropout=0" "module_dropout=0" "use_tucker=True" "use_scalar=False" "rank_dropout_scale=False" "algo=lokr" "bypass_mode=False" "factor=16" "dora_wd=True" "train_norm=False" \
+    --network_dropout=0 \
+    --optimizer_type=SAVEUS \
+    --train_batch_size=14 \
+    --max_grad_norm=1 \
+    --gradient_checkpointing \
+    --lr_warmup_steps=0 \
+    --learning_rate=0.0004 \
+    --unet_lr=0.0004 \
+    --text_encoder_lr=0.0001 \
+    --lr_scheduler="cosine" \
+    --lr_scheduler_args="num_cycles=0.375" \
+    --multires_noise_iterations=12 \
+    --multires_noise_discount=0.1 \
+    --no_half_vae \
+    --sdpa \
+    --mixed_precision="bf16" \
+    --save_model_as="safetensors" \
+    --save_precision="fp16" \
+    --save_every_n_steps=100 \
+    --sample_every_n_steps=100 \
+    --sample_sampler="euler" \
+    --sample_at_first \
+    --caption_extension=".txt" \
+    --logging_dir=/home/kade/output_dir/logs \
+    --sample_prompts="/home/kade/datasets/${NAME}/sample-prompts.txt"
