@@ -12,6 +12,7 @@ import pathlib
 import re
 import shutil
 import time
+import typing
 from typing import (
     Any,
     Callable,
@@ -21,7 +22,7 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
-    Union,
+    Union
 )
 from accelerate import Accelerator, InitProcessGroupKwargs, DistributedDataParallelKwargs, PartialState
 import glob
@@ -144,6 +145,44 @@ IMAGE_TRANSFORMS = transforms.Compose(
 
 TEXT_ENCODER_OUTPUTS_CACHE_SUFFIX = "_te_outputs.npz"
 TEXT_ENCODER_OUTPUTS_CACHE_SUFFIX_SD3 = "_sd3_te.npz"
+
+def split_train_val(
+    paths: List[str], 
+    sizes: List[Optional[Tuple[int, int]]],
+    is_training_dataset: bool, 
+    validation_split: float, 
+    validation_seed: int | None
+) -> Tuple[List[str], List[Optional[Tuple[int, int]]]]:
+    """
+    Split the dataset into train and validation
+
+    Shuffle the dataset based on the validation_seed or the current random seed.
+    For example if the split of 0.2 of 100 images.
+    [0:80] = 80 training images
+    [80:] = 20 validation images
+    """
+    dataset = list(zip(paths, sizes))
+    if validation_seed is not None:
+        logging.info(f"Using validation seed: {validation_seed}")
+        prevstate = random.getstate()
+        random.seed(validation_seed)
+        random.shuffle(dataset)
+        random.setstate(prevstate)
+    else:
+        random.shuffle(dataset)
+
+    paths, sizes = zip(*dataset)
+    paths = list(paths)
+    sizes = list(sizes)
+    # Split the dataset between training and validation
+    if is_training_dataset:
+        # Training dataset we split to the first part
+        split = math.ceil(len(paths) * (1 - validation_split))
+        return paths[0:split], sizes[0:split]
+    else:
+        # Validation dataset we split to the second part
+        split = len(paths) - round(len(paths) * validation_split)
+        return paths[split:], sizes[split:]
 
 
 class ImageInfo:
@@ -397,6 +436,8 @@ class BaseSubset:
         token_warmup_min: int,
         token_warmup_step: Union[float, int],
         custom_attributes: Optional[Dict[str, Any]] = None,
+        validation_seed: Optional[int] = None,
+        validation_split: Optional[float] = 0.0,
     ) -> None:
         self.image_dir = image_dir
         self.alpha_mask = alpha_mask if alpha_mask is not None else False
@@ -423,6 +464,9 @@ class BaseSubset:
         self.custom_attributes = custom_attributes if custom_attributes is not None else {}
 
         self.img_count = 0
+
+        self.validation_seed = validation_seed
+        self.validation_split = validation_split
 
 
 class DreamBoothSubset(BaseSubset):
@@ -453,6 +497,8 @@ class DreamBoothSubset(BaseSubset):
         token_warmup_min,
         token_warmup_step,
         custom_attributes: Optional[Dict[str, Any]] = None,
+        validation_seed: Optional[int] = None,
+        validation_split: Optional[float] = 0.0,
     ) -> None:
         assert image_dir is not None, "image_dir must be specified"
 
@@ -478,6 +524,8 @@ class DreamBoothSubset(BaseSubset):
             token_warmup_min,
             token_warmup_step,
             custom_attributes=custom_attributes,
+            validation_seed=validation_seed,
+            validation_split=validation_split,
         )
 
         self.is_reg = is_reg
@@ -518,6 +566,8 @@ class FineTuningSubset(BaseSubset):
         token_warmup_min,
         token_warmup_step,
         custom_attributes: Optional[Dict[str, Any]] = None,
+        validation_seed: Optional[int] = None,
+        validation_split: Optional[float] = 0.0,
     ) -> None:
         assert metadata_file is not None, "metadata_file must be specified"
 
@@ -543,6 +593,8 @@ class FineTuningSubset(BaseSubset):
             token_warmup_min,
             token_warmup_step,
             custom_attributes=custom_attributes,
+            validation_seed=validation_seed,
+            validation_split=validation_split,
         )
 
         self.metadata_file = metadata_file
@@ -579,6 +631,8 @@ class ControlNetSubset(BaseSubset):
         token_warmup_min,
         token_warmup_step,
         custom_attributes: Optional[Dict[str, Any]] = None,
+        validation_seed: Optional[int] = None,
+        validation_split: Optional[float] = 0.0,
     ) -> None:
         assert image_dir is not None, "image_dir must be specified"
 
@@ -604,6 +658,8 @@ class ControlNetSubset(BaseSubset):
             token_warmup_min,
             token_warmup_step,
             custom_attributes=custom_attributes,
+            validation_seed=validation_seed,
+            validation_split=validation_split,
         )
 
         self.conditioning_data_dir = conditioning_data_dir
@@ -1786,9 +1842,13 @@ class BaseDataset(torch.utils.data.Dataset):
 class DreamBoothDataset(BaseDataset):
     IMAGE_INFO_CACHE_FILE = "metadata_cache.json"
 
+    # The is_training_dataset defines the type of dataset, training or validation 
+    # if is_training_dataset is True -> training dataset
+    # if is_training_dataset is False -> validation dataset
     def __init__(
         self,
         subsets: Sequence[DreamBoothSubset],
+        is_training_dataset: bool,
         batch_size: int,
         resolution,
         network_multiplier: float,
@@ -1799,6 +1859,8 @@ class DreamBoothDataset(BaseDataset):
         bucket_no_upscale: bool,
         prior_loss_weight: float,
         debug_dataset: bool,
+        validation_split: float,
+        validation_seed: Optional[int],
     ) -> None:
         super().__init__(resolution, network_multiplier, debug_dataset)
 
@@ -1808,6 +1870,9 @@ class DreamBoothDataset(BaseDataset):
         self.size = min(self.width, self.height)  # 短いほう
         self.prior_loss_weight = prior_loss_weight
         self.latents_cache = None
+        self.is_training_dataset = is_training_dataset
+        self.validation_seed = validation_seed
+        self.validation_split = validation_split
 
         self.enable_bucket = enable_bucket
         if self.enable_bucket:
@@ -1871,12 +1936,12 @@ class DreamBoothDataset(BaseDataset):
                 with open(info_cache_file, "r", encoding="utf-8") as f:
                     metas = json.load(f)
                 img_paths = list(metas.keys())
-                sizes = [meta["resolution"] for meta in metas.values()]
+                sizes: List[Optional[Tuple[int, int]]] = [meta["resolution"] for meta in metas.values()]
 
                 # we may need to check image size and existence of image files, but it takes time, so user should check it before training
             else:
                 img_paths = glob_images(subset.image_dir, "*")
-                sizes = [None] * len(img_paths)
+                sizes: List[Optional[Tuple[int, int]]] = [None] * len(img_paths)
 
                 # new caching: get image size from cache files
                 strategy = LatentsCachingStrategy.get_strategy()
@@ -1909,9 +1974,35 @@ class DreamBoothDataset(BaseDataset):
                             w, h = None, None
 
                         if w is not None and h is not None:
-                            sizes[i] = [w, h]
+                            sizes[i] = (w, h)
                             size_set_count += 1
                     logger.info(f"set image size from cache files: {size_set_count}/{len(img_paths)}")
+
+            # We want to create a training and validation split. This should be improved in the future
+            # to allow a clearer distinction between training and validation. This can be seen as a 
+            # short-term solution to limit what is necessary to implement validation datasets
+            # 
+            # We split the dataset for the subset based on if we are doing a validation split
+            # The self.is_training_dataset defines the type of dataset, training or validation 
+            # if self.is_training_dataset is True -> training dataset
+            # if self.is_training_dataset is False -> validation dataset
+            if self.validation_split > 0.0:
+                # For regularization images we do not want to split this dataset. 
+                if subset.is_reg is True:
+                    # Skip any validation dataset for regularization images
+                    if self.is_training_dataset is False:
+                        img_paths = []
+                        sizes = []
+                    # Otherwise the img_paths remain as original img_paths and no split 
+                    # required for training images dataset of regularization images
+                else:
+                    img_paths, sizes = split_train_val(
+                        img_paths, 
+                        sizes,
+                        self.is_training_dataset, 
+                        self.validation_split, 
+                        self.validation_seed
+                    )
 
             logger.info(f"found directory {subset.image_dir} contains {len(img_paths)} image files")
 
@@ -1971,8 +2062,11 @@ class DreamBoothDataset(BaseDataset):
         num_reg_images = 0
         reg_infos: List[Tuple[ImageInfo, DreamBoothSubset]] = []
         for subset in subsets:
-            if subset.num_repeats < 1:
-                logger.warning(f"ignore subset with image_dir='{subset.image_dir}': num_repeats is less than 1")
+            num_repeats = subset.num_repeats if self.is_training_dataset else 1
+            if num_repeats < 1:
+                logger.warning(
+                    f"ignore subset with image_dir='{subset.image_dir}': num_repeats is less than 1 / num_repeatsが1を下回っているためサブセットを無視します: {num_repeats}"
+                )
                 continue
 
             if subset in self.subsets:
@@ -1985,12 +2079,12 @@ class DreamBoothDataset(BaseDataset):
                 continue
 
             if subset.is_reg:
-                num_reg_images += subset.num_repeats * len(img_paths)
+                num_reg_images += num_repeats * len(img_paths)
             else:
-                num_train_images += subset.num_repeats * len(img_paths)
+                num_train_images += num_repeats * len(img_paths)
 
             for img_path, caption, size in zip(img_paths, captions, sizes):
-                info = ImageInfo(img_path, subset.num_repeats, caption, subset.is_reg, img_path)
+                info = ImageInfo(img_path, num_repeats, caption, subset.is_reg, img_path)
                 if size is not None:
                     info.image_size = size
                 if subset.is_reg:
@@ -2001,10 +2095,12 @@ class DreamBoothDataset(BaseDataset):
             subset.img_count = len(img_paths)
             self.subsets.append(subset)
 
-        logger.info(f"{num_train_images} train images with repeating.")
+        images_split_name = "train" if self.is_training_dataset else "validation"
+        logger.info(f"{num_train_images} {images_split_name} images with repeats.")
+
         self.num_train_images = num_train_images
 
-        logger.info(f"{num_reg_images} reg images.")
+        logger.info(f"{num_reg_images} reg images with repeats.")
         if num_train_images < num_reg_images:
             logger.warning("some of reg images are not used")
 
@@ -2042,6 +2138,8 @@ class FineTuningDataset(BaseDataset):
         bucket_reso_steps: int,
         bucket_no_upscale: bool,
         debug_dataset: bool,
+        validation_seed: int,
+        validation_split: float,
     ) -> None:
         super().__init__(resolution, network_multiplier, debug_dataset)
 
@@ -2261,7 +2359,9 @@ class ControlNetDataset(BaseDataset):
         max_bucket_reso: int,
         bucket_reso_steps: int,
         bucket_no_upscale: bool,
-        debug_dataset: float,
+        debug_dataset: bool,
+        validation_split: float,
+        validation_seed: Optional[int],        
     ) -> None:
         super().__init__(resolution, network_multiplier, debug_dataset)
 
@@ -2300,6 +2400,7 @@ class ControlNetDataset(BaseDataset):
 
         self.dreambooth_dataset_delegate = DreamBoothDataset(
             db_subsets,
+            True,
             batch_size,
             resolution,
             network_multiplier,
@@ -2310,13 +2411,17 @@ class ControlNetDataset(BaseDataset):
             bucket_no_upscale,
             1.0,
             debug_dataset,
+            validation_split,
+            validation_seed,
         )
 
         # config_util等から参照される値をいれておく（若干微妙なのでなんとかしたい）
         self.image_data = self.dreambooth_dataset_delegate.image_data
         self.batch_size = batch_size
         self.num_train_images = self.dreambooth_dataset_delegate.num_train_images
-        self.num_reg_images = self.dreambooth_dataset_delegate.num_reg_images
+        self.num_reg_images = self.dreambooth_dataset_delegate.num_reg_images        
+        self.validation_split = validation_split
+        self.validation_seed = validation_seed 
 
         # assert all conditioning data exists
         missing_imgs = []
@@ -2783,6 +2888,9 @@ class MinimalDataset(BaseDataset):
             return example
         """
         raise NotImplementedError
+
+    def get_resolutions(self) -> List[Tuple[int, int]]:
+        return []
 
 
 def load_arbitrary_dataset(args, tokenizer=None) -> MinimalDataset:
@@ -3879,7 +3987,16 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
         "--huber_c",
         type=float,
         default=0.1,
-        help="The huber loss parameter. Only used if one of the huber loss modes (huber or smooth l1) is selected with loss_type. default is 0.1",
+        help="The Huber loss decay parameter. Only used if one of the huber loss modes (huber or smooth l1) is selected with loss_type. default is 0.1"
+        " / Huber損失の減衰パラメータ。loss_typeがhuberまたはsmooth l1の場合に有効。デフォルトは0.1",
+    )
+
+    parser.add_argument(
+        "--huber_scale",
+        type=float,
+        default=1.0,
+        help="The Huber loss scale parameter. Only used if one of the huber loss modes (huber or smooth l1) is selected with loss_type. default is 1.0"
+        " / Huber損失のスケールパラメータ。loss_typeがhuberまたはsmooth l1の場合に有効。デフォルトは1.0",
     )
 
     parser.add_argument(
@@ -4483,7 +4600,6 @@ def read_config_from_file(args: argparse.Namespace, parser: argparse.ArgumentPar
     config_args = argparse.Namespace(**ignore_nesting_dict)
     args = parser.parse_args(namespace=config_args)
     args.config_file = os.path.splitext(args.config_file)[0]
-    logger.info(args.config_file)
 
     return args
 
@@ -4546,7 +4662,7 @@ def resume_from_local_or_hf_if_specified(accelerator, args):
     accelerator.load_state(dirname)
 
 
-def get_optimizer(args, trainable_params):
+def get_optimizer(args, trainable_params) -> tuple[str, str, object]:
     # "Optimizer to use: AdamW, AdamW8bit, Lion, SGDNesterov, SGDNesterov8bit, PagedAdamW, PagedAdamW8bit, PagedAdamW32bit, Lion8bit, PagedLion8bit, AdEMAMix8bit, PagedAdEMAMix8bit, DAdaptation(DAdaptAdamPreprint), DAdaptAdaGrad, DAdaptAdam, DAdaptAdan, DAdaptAdanIP, DAdaptLion, DAdaptSGD, Adafactor"
 
     optimizer_type = args.optimizer_type
@@ -4825,18 +4941,22 @@ def get_optimizer(args, trainable_params):
         try:
             import schedulefree as sf
         except ImportError:
-            raise ImportError("No schedulefree")
-        if optimizer_type == "AdamWScheduleFree".lower():
+            raise ImportError("No schedulefree / schedulefreeがインストールされていないようです")
+
+        if optimizer_type == "RAdamScheduleFree".lower():
+            optimizer_class = sf.RAdamScheduleFree
+            logger.info(f"use RAdamScheduleFree optimizer | {optimizer_kwargs}")
+        elif optimizer_type == "AdamWScheduleFree".lower():
             optimizer_class = sf.AdamWScheduleFree
             logger.info(f"use AdamWScheduleFree optimizer | {optimizer_kwargs}")
         elif optimizer_type == "SGDScheduleFree".lower():
             optimizer_class = sf.SGDScheduleFree
             logger.info(f"use SGDScheduleFree optimizer | {optimizer_kwargs}")
         else:
-            raise ValueError(f"Unknown optimizer type: {optimizer_type}")
-        optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
-        # make optimizer as train mode: we don't need to call train again, because eval will not be called in training loop
-        optimizer.train()
+            optimizer_class = None
+
+        if optimizer_class is not None:
+            optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
     elif optimizer_type == "Fcompass".lower():
         logger.info(f"use Fcompass optimizer | {optimizer_kwargs}")
@@ -5027,6 +5147,10 @@ def get_optimizer(args, trainable_params):
     # for logging
     optimizer_name = optimizer_class.__module__ + "." + optimizer_class.__name__
     optimizer_args = ",".join([f"{k}={v}" for k, v in optimizer_kwargs.items()])
+
+    if hasattr(optimizer, "train") and callable(optimizer.train):
+        # make optimizer as train mode before training for schedulefree optimizer. the optimizer will be in eval mode in sampling and saving.
+        optimizer.train()
 
     return optimizer_name, optimizer_args, optimizer
 
@@ -5852,32 +5976,13 @@ def save_sd_model_on_train_end_common(
             huggingface_util.upload(args, out_dir, "/" + model_name, force_sync_upload=True)
 
 
-def get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler, b_size, device):
+def get_timesteps(min_timestep: int, max_timestep: int, b_size: int, device: torch.device) -> torch.Tensor:
     timesteps = torch.randint(min_timestep, max_timestep, (b_size,), device="cpu")
-
-    if args.loss_type == "huber" or args.loss_type == "smooth_l1":
-        if args.huber_schedule == "exponential":
-            alpha = -math.log(args.huber_c) / noise_scheduler.config.num_train_timesteps
-            huber_c = torch.exp(-alpha * timesteps)
-        elif args.huber_schedule == "snr":
-            alphas_cumprod = torch.index_select(noise_scheduler.alphas_cumprod, 0, timesteps)
-            sigmas = ((1.0 - alphas_cumprod) / alphas_cumprod) ** 0.5
-            huber_c = (1 - args.huber_c) / (1 + sigmas) ** 2 + args.huber_c
-        elif args.huber_schedule == "constant":
-            huber_c = torch.full((b_size,), args.huber_c)
-        else:
-            raise NotImplementedError(f"Unknown Huber loss schedule {args.huber_schedule}!")
-        huber_c = huber_c.to(device)
-    elif args.loss_type == "l2":
-        huber_c = None  # may be anything, as it's not used
-    else:
-        raise NotImplementedError(f"Unknown loss type {args.loss_type}")
-
     timesteps = timesteps.long().to(device)
-    return timesteps, huber_c
+    return timesteps
 
 
-def get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents):
+def get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents: torch.FloatTensor) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.IntTensor]:
     # Sample noise that we'll add to the latents
     noise = torch.randn_like(latents, device=latents.device)
     if args.noise_offset:
@@ -5896,7 +6001,7 @@ def get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents):
     min_timestep = 0 if args.min_timestep is None else args.min_timestep
     max_timestep = noise_scheduler.config.num_train_timesteps if args.max_timestep is None else args.max_timestep
 
-    timesteps, huber_c = get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler, b_size, latents.device)
+    timesteps = get_timesteps(min_timestep, max_timestep, b_size, latents.device)
 
     # Add noise to the latents according to the noise magnitude at each timestep
     # (this is the forward diffusion process)
@@ -5909,17 +6014,45 @@ def get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents):
     else:
         noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
 
-    return noise, noisy_latents, timesteps, huber_c
+    return noise, noisy_latents, timesteps
+
+
+def get_huber_threshold_if_needed(args, timesteps: torch.Tensor, noise_scheduler) -> Optional[torch.Tensor]:
+    if not (args.loss_type == "huber" or args.loss_type == "smooth_l1"):
+        return None
+
+    b_size = timesteps.shape[0]
+    if args.huber_schedule == "exponential":
+        alpha = -math.log(args.huber_c) / noise_scheduler.config.num_train_timesteps
+        result = torch.exp(-alpha * timesteps) * args.huber_scale
+    elif args.huber_schedule == "snr":
+        if not hasattr(noise_scheduler, "alphas_cumprod"):
+            raise NotImplementedError("Huber schedule 'snr' is not supported with the current model.")
+        alphas_cumprod = torch.index_select(noise_scheduler.alphas_cumprod, 0, timesteps.cpu())
+        sigmas = ((1.0 - alphas_cumprod) / alphas_cumprod) ** 0.5
+        result = (1 - args.huber_c) / (1 + sigmas) ** 2 + args.huber_c
+        result = result.to(timesteps.device)
+    elif args.huber_schedule == "constant":
+        result = torch.full((b_size,), args.huber_c * args.huber_scale, device=timesteps.device)
+    else:
+        raise NotImplementedError(f"Unknown Huber loss schedule {args.huber_schedule}!")
+
+    return result
 
 
 def conditional_loss(
-    model_pred: torch.Tensor, target: torch.Tensor, reduction: str, loss_type: str, huber_c: Optional[torch.Tensor]
+    model_pred: torch.Tensor, target: torch.Tensor, loss_type: str, reduction: str, huber_c: Optional[torch.Tensor] = None
 ):
+    """
+    NOTE: if you're using the scheduled version, huber_c has to depend on the timesteps already
+    """
     if loss_type == "l2":
         loss = torch.nn.functional.mse_loss(model_pred, target, reduction=reduction)
     elif loss_type == "l1":
         loss = torch.nn.functional.l1_loss(model_pred, target, reduction=reduction)
     elif loss_type == "huber":
+        if huber_c is None:
+            raise NotImplementedError("huber_c not implemented correctly")
         huber_c = huber_c.view(-1, 1, 1, 1)
         loss = 2 * huber_c * (torch.sqrt((model_pred - target) ** 2 + huber_c**2) - huber_c)
         if reduction == "mean":
@@ -5927,6 +6060,8 @@ def conditional_loss(
         elif reduction == "sum":
             loss = torch.sum(loss)
     elif loss_type == "smooth_l1":
+        if huber_c is None:
+            raise NotImplementedError("huber_c not implemented correctly")
         huber_c = huber_c.view(-1, 1, 1, 1)
         loss = 2 * (torch.sqrt((model_pred - target) ** 2 + huber_c**2) - huber_c)
         if reduction == "mean":
@@ -5934,7 +6069,7 @@ def conditional_loss(
         elif reduction == "sum":
             loss = torch.sum(loss)
     else:
-        raise NotImplementedError(f"Unsupported Loss Type {loss_type}")
+        raise NotImplementedError(f"Unsupported Loss Type: {loss_type}")
     return loss
 
 
@@ -5944,7 +6079,7 @@ def append_lr_to_logs(logs, lr_scheduler, optimizer_type, including_unet=True):
         names.append("unet")
     names.append("text_encoder1")
     names.append("text_encoder2")
-    names.append("text_encoder3") # SD3
+    names.append("text_encoder3")  # SD3
 
     append_lr_to_logs_with_names(logs, lr_scheduler, optimizer_type, names)
 
@@ -6337,6 +6472,30 @@ def sample_image_inference(
         wandb_tracker.log({f"sample_{i}": wandb.Image(image, caption=prompt)}, commit=False)  # positive prompt as a caption
 
 
+def init_trackers(accelerator: Accelerator, args: argparse.Namespace, default_tracker_name: str): 
+    """
+    Initialize experiment trackers with tracker specific behaviors
+    """
+    if accelerator.is_main_process:
+        init_kwargs = {}
+        if args.wandb_run_name:
+            init_kwargs["wandb"] = {"name": args.wandb_run_name}
+        if args.log_tracker_config is not None:
+            init_kwargs = toml.load(args.log_tracker_config)
+        accelerator.init_trackers(
+            default_tracker_name if args.log_tracker_name is None else args.log_tracker_name,
+            config=get_sanitized_config_or_none(args),
+            init_kwargs=init_kwargs,
+        )
+
+        if "wandb" in [tracker.name for tracker in accelerator.trackers]:
+            import wandb 
+            wandb_tracker = accelerator.get_tracker("wandb", unwrap=True)
+
+            # Define specific metrics to handle validation and epochs "steps"
+            wandb_tracker.define_metric("epoch", hidden=True)
+            wandb_tracker.define_metric("val_step", hidden=True)
+
 # endregion
 
 
@@ -6405,8 +6564,10 @@ class LossRecorder:
 
     @property
     def moving_average(self) -> float:
-        return self.loss_total / len(self.loss_list)
-
+        losses = len(self.loss_list)
+        if losses == 0:
+            return 0
+        return self.loss_total / losses
 
 class Bitstream:
     """
