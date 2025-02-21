@@ -12,7 +12,6 @@ import pathlib
 import re
 import shutil
 import time
-import typing
 from typing import (
     Any,
     Callable,
@@ -120,15 +119,7 @@ try:
 except:
     pass
 
-# JPEG-XL on Linux
-try:
-    from jxlpy import JXLImagePlugin
-
-    IMAGE_EXTENSIONS.extend([".jxl", ".JXL"])
-except:
-    pass
-
-# JPEG-XL on Windows
+# JPEG-XL
 try:
     import pillow_jxl
 
@@ -3153,12 +3144,12 @@ def load_text_encoder_outputs_from_disk(npz_path):
 
 # endregion
 
-# region モジュール入れ替え部
+# region Optimizations / Module replacement
 """
-高速化のためのモジュール入れ替え
+Optimizations
 """
 
-# FlashAttentionを使うCrossAttention
+# CrossAttention using FlashAttention
 # based on https://github.com/lucidrains/memory-efficient-attention-pytorch/blob/main/memory_efficient_attention_pytorch/flash_attention.py
 # LICENSE MIT https://github.com/lucidrains/memory-efficient-attention-pytorch/blob/main/LICENSE
 
@@ -3261,60 +3252,6 @@ def get_git_revision_hash() -> str:
         return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=os.path.dirname(__file__)).decode("ascii").strip()
     except:
         return "(unknown)"
-
-
-# def replace_unet_modules(unet: diffusers.models.unet_2d_condition.UNet2DConditionModel, mem_eff_attn, xformers):
-#     replace_attentions_for_hypernetwork()
-#     # unet is not used currently, but it is here for future use
-#     unet.enable_xformers_memory_efficient_attention()
-#     return
-#     if mem_eff_attn:
-#         unet.set_attn_processor(FlashAttnProcessor())
-#     elif xformers:
-#         unet.enable_xformers_memory_efficient_attention()
-
-
-# def replace_unet_cross_attn_to_xformers():
-#     logger.info("CrossAttention.forward has been replaced to enable xformers.")
-#     try:
-#         import xformers.ops
-#     except ImportError:
-#         raise ImportError("No xformers / xformersがインストールされていないようです")
-
-#     def forward_xformers(self, x, context=None, mask=None):
-#         h = self.heads
-#         q_in = self.to_q(x)
-
-#         context = default(context, x)
-#         context = context.to(x.dtype)
-
-#         if hasattr(self, "hypernetwork") and self.hypernetwork is not None:
-#             context_k, context_v = self.hypernetwork.forward(x, context)
-#             context_k = context_k.to(x.dtype)
-#             context_v = context_v.to(x.dtype)
-#         else:
-#             context_k = context
-#             context_v = context
-
-#         k_in = self.to_k(context_k)
-#         v_in = self.to_v(context_v)
-
-#         q, k, v = map(lambda t: rearrange(t, "b n (h d) -> b n h d", h=h), (q_in, k_in, v_in))
-#         del q_in, k_in, v_in
-
-#         q = q.contiguous()
-#         k = k.contiguous()
-#         v = v.contiguous()
-#         out = xformers.ops.memory_efficient_attention(q, k, v, attn_bias=None)  # 最適なのを選んでくれる
-
-#         out = rearrange(out, "b n h d -> b n (h d)", h=h)
-
-#         # diffusers 0.7.0~
-#         out = self.to_out[0](out)
-#         out = self.to_out[1](out)
-#         return out
-
-
 #     diffusers.models.attention.CrossAttention.forward = forward_xformers
 def replace_unet_modules(unet: UNet2DConditionModel, mem_eff_attn, xformers, sdpa):
     if mem_eff_attn:
@@ -3331,60 +3268,6 @@ def replace_unet_modules(unet: UNet2DConditionModel, mem_eff_attn, xformers, sdp
     elif sdpa:
         logger.info("Enable SDPA for U-Net")
         unet.set_use_sdpa(True)
-
-
-"""
-def replace_vae_modules(vae: diffusers.models.AutoencoderKL, mem_eff_attn, xformers):
-    # vae is not used currently, but it is here for future use
-    if mem_eff_attn:
-        replace_vae_attn_to_memory_efficient()
-    elif xformers:
-        # とりあえずDiffusersのxformersを使う。AttentionがあるのはMidBlockのみ
-        logger.info("Use Diffusers xformers for VAE")
-        vae.encoder.mid_block.attentions[0].set_use_memory_efficient_attention_xformers(True)
-        vae.decoder.mid_block.attentions[0].set_use_memory_efficient_attention_xformers(True)
-
-
-def replace_vae_attn_to_memory_efficient():
-    logger.info("AttentionBlock.forward has been replaced to FlashAttention (not xformers)")
-    flash_func = FlashAttentionFunction
-
-    def forward_flash_attn(self, hidden_states):
-        logger.info("forward_flash_attn")
-        q_bucket_size = 512
-        k_bucket_size = 1024
-
-        residual = hidden_states
-        batch, channel, height, width = hidden_states.shape
-
-        # norm
-        hidden_states = self.group_norm(hidden_states)
-
-        hidden_states = hidden_states.view(batch, channel, height * width).transpose(1, 2)
-
-        # proj to q, k, v
-        query_proj = self.query(hidden_states)
-        key_proj = self.key(hidden_states)
-        value_proj = self.value(hidden_states)
-
-        query_proj, key_proj, value_proj = map(
-            lambda t: rearrange(t, "b n (h d) -> b h n d", h=self.num_heads), (query_proj, key_proj, value_proj)
-        )
-
-        out = flash_func.apply(query_proj, key_proj, value_proj, None, False, q_bucket_size, k_bucket_size)
-
-        out = rearrange(out, "b h n d -> b n (h d)")
-
-        # compute next hidden_states
-        hidden_states = self.proj_attn(hidden_states)
-        hidden_states = hidden_states.transpose(-1, -2).reshape(batch, channel, height, width)
-
-        # res connect and rescale
-        hidden_states = (hidden_states + residual) / self.rescale_output_factor
-        return hidden_states
-
-    diffusers.models.attention.AttentionBlock.forward = forward_flash_attn
-"""
 
 
 # endregion
@@ -4285,18 +4168,6 @@ def verify_training_args(args: argparse.Namespace):
         args.cache_latents = True
         logger.warning("cache_latents_to_disk is enabled, so cache_latents is also enabled")
 
-    # noise_offset, perlin_noise, multires_noise_iterations cannot be enabled at the same time
-    # if args.noise_offset is not None and args.multires_noise_iterations is not None:
-    #     raise ValueError(
-    #         "noise_offset and multires_noise_iterations cannot be enabled at the same time"
-    #     )
-    # if args.noise_offset is not None and args.perlin_noise is not None:
-    #     raise ValueError("noise_offset and perlin_noise cannot be enabled at the same time")
-    # if args.perlin_noise is not None and args.multires_noise_iterations is not None:
-    #     raise ValueError(
-    #         "perlin_noise and multires_noise_iterations cannot be enabled at the same time"
-    #     )
-
     if args.adaptive_noise_scale is not None and args.noise_offset is None:
         raise ValueError("adaptive_noise_scale requires noise_offset")
 
@@ -5049,7 +4920,7 @@ def get_optimizer(args, trainable_params) -> tuple[str, str, object]:
         optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
     if optimizer is None:
-        # 任意のoptimizerを使う
+        # use any optimizer
         case_sensitive_optimizer_type = args.optimizer_type  # not lower
         logger.info(f"use {case_sensitive_optimizer_type} | {optimizer_kwargs}")
 
@@ -5062,87 +4933,6 @@ def get_optimizer(args, trainable_params) -> tuple[str, str, object]:
 
         optimizer_class = getattr(optimizer_module, case_sensitive_optimizer_type)
         optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
-
-    """
-    # wrap any of above optimizer with schedulefree, if optimizer is not schedulefree
-    if args.optimizer_schedulefree_wrapper and not optimizer_type.endswith("schedulefree".lower()):
-        try:
-            import schedulefree as sf
-        except ImportError:
-            raise ImportError("No schedulefree")
-
-        schedulefree_wrapper_kwargs = {}
-        if args.schedulefree_wrapper_args is not None and len(args.schedulefree_wrapper_args) > 0:
-            for arg in args.schedulefree_wrapper_args:
-                key, value = arg.split("=")
-                value = ast.literal_eval(value)
-                schedulefree_wrapper_kwargs[key] = value
-
-        sf_wrapper = sf.ScheduleFreeWrapper(optimizer, **schedulefree_wrapper_kwargs)
-        sf_wrapper.train()  # make optimizer as train mode
-
-        # we need to make optimizer as a subclass of torch.optim.Optimizer, we make another Proxy class over SFWrapper
-        class OptimizerProxy(torch.optim.Optimizer):
-            def __init__(self, sf_wrapper):
-                self._sf_wrapper = sf_wrapper
-
-            def __getattr__(self, name):
-                return getattr(self._sf_wrapper, name)
-
-            # override properties
-            @property
-            def state(self):
-                return self._sf_wrapper.state
-
-            @state.setter
-            def state(self, state):
-                self._sf_wrapper.state = state
-
-            @property
-            def param_groups(self):
-                return self._sf_wrapper.param_groups
-
-            @param_groups.setter
-            def param_groups(self, param_groups):
-                self._sf_wrapper.param_groups = param_groups
-
-            @property
-            def defaults(self):
-                return self._sf_wrapper.defaults
-
-            @defaults.setter
-            def defaults(self, defaults):
-                self._sf_wrapper.defaults = defaults
-
-            def add_param_group(self, param_group):
-                self._sf_wrapper.add_param_group(param_group)
-
-            def load_state_dict(self, state_dict):
-                self._sf_wrapper.load_state_dict(state_dict)
-
-            def state_dict(self):
-                return self._sf_wrapper.state_dict()
-
-            def zero_grad(self):
-                self._sf_wrapper.zero_grad()
-
-            def step(self, closure=None):
-                self._sf_wrapper.step(closure)
-
-            def train(self):
-                self._sf_wrapper.train()
-
-            def eval(self):
-                self._sf_wrapper.eval()
-
-            # isinstance チェックをパスするためのメソッド
-            def __instancecheck__(self, instance):
-                return isinstance(instance, (type(self), Optimizer))
-
-        optimizer = OptimizerProxy(sf_wrapper)
-
-        logger.info(f"wrap optimizer with ScheduleFreeWrapper | {schedulefree_wrapper_kwargs}")
-    """
 
     # for logging
     optimizer_name = optimizer_class.__module__ + "." + optimizer_class.__name__
@@ -5190,8 +4980,6 @@ def get_dummy_scheduler(optimizer: Optimizer) -> Any:
 
 # Modified version of get_scheduler() function from diffusers.optimizer.get_scheduler
 # Add some checking and features to the original function.
-
-
 def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
     """
     Unified API to get any scheduler from its name.
