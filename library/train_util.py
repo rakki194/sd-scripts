@@ -13,8 +13,23 @@ import re
 import shutil
 import time
 import typing
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
-from accelerate import Accelerator, InitProcessGroupKwargs, DistributedDataParallelKwargs, PartialState
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
+from accelerate import (
+    Accelerator,
+    InitProcessGroupKwargs,
+    DistributedDataParallelKwargs,
+    PartialState,
+)
 import glob
 import math
 import os
@@ -31,7 +46,12 @@ from packaging.version import Version
 
 import torch
 from library.device_utils import init_ipex, clean_memory_on_device
-from library.strategy_base import LatentsCachingStrategy, TokenizeStrategy, TextEncoderOutputsCachingStrategy, TextEncodingStrategy
+from library.strategy_base import (
+    LatentsCachingStrategy,
+    TokenizeStrategy,
+    TextEncoderOutputsCachingStrategy,
+    TextEncodingStrategy,
+)
 
 init_ipex()
 
@@ -69,7 +89,9 @@ import imagesize
 import cv2
 import safetensors.torch
 from library.lpw_stable_diffusion import StableDiffusionLongPromptWeightingPipeline
-from library.sdxl_lpw_stable_diffusion import SdxlStableDiffusionLongPromptWeightingPipeline
+from library.sdxl_lpw_stable_diffusion import (
+    SdxlStableDiffusionLongPromptWeightingPipeline,
+)
 import library.model_util as model_util
 import library.huggingface_util as huggingface_util
 import library.sai_model_spec as sai_model_spec
@@ -101,7 +123,18 @@ STEP_DIFFUSERS_DIR_NAME = "{}-step{:08d}"
 
 # region dataset
 
-IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".PNG", ".JPG", ".JPEG", ".WEBP", ".BMP"]
+IMAGE_EXTENSIONS = [
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".bmp",
+    ".PNG",
+    ".JPG",
+    ".JPEG",
+    ".WEBP",
+    ".BMP",
+]
 
 try:
     import pillow_avif
@@ -169,7 +202,14 @@ def split_train_val(
 
 
 class ImageInfo:
-    def __init__(self, image_key: str, num_repeats: int, caption: str, is_reg: bool, absolute_path: str) -> None:
+    def __init__(
+        self,
+        image_key: str,
+        num_repeats: int,
+        caption: str,
+        is_reg: bool,
+        absolute_path: str,
+    ) -> None:
         self.image_key: str = image_key
         self.num_repeats: int = num_repeats
         self.caption: str = caption
@@ -181,13 +221,17 @@ class ImageInfo:
         self.latents: Optional[torch.Tensor] = None
         self.latents_flipped: Optional[torch.Tensor] = None
         self.latents_npz: Optional[str] = None  # set in cache_latents
-        self.latents_original_size: Optional[Tuple[int, int]] = None  # original image size, not latents size
+        self.latents_original_size: Optional[Tuple[int, int]] = (
+            None  # original image size, not latents size
+        )
         self.latents_crop_ltrb: Optional[Tuple[int, int]] = (
             None  # crop left top right bottom in original pixel size, not latents size
         )
         self.cond_img_path: Optional[str] = None
         self.image: Optional[Image.Image] = None  # optional, original PIL Image
-        self.text_encoder_outputs_npz: Optional[str] = None  # set in cache_text_encoder_outputs
+        self.text_encoder_outputs_npz: Optional[str] = (
+            None  # set in cache_text_encoder_outputs
+        )
 
         # new
         self.text_encoder_outputs: Optional[List[torch.Tensor]] = None
@@ -196,17 +240,25 @@ class ImageInfo:
         self.text_encoder_outputs2: Optional[torch.Tensor] = None
         self.text_encoder_pool2: Optional[torch.Tensor] = None
 
-        self.alpha_mask: Optional[torch.Tensor] = None  # alpha mask can be flipped in runtime
+        self.alpha_mask: Optional[torch.Tensor] = (
+            None  # alpha mask can be flipped in runtime
+        )
 
 
 class BucketManager:
     def __init__(self, no_upscale, max_reso, min_size, max_size, reso_steps) -> None:
         if max_size is not None:
             if max_reso is not None:
-                assert max_size >= max_reso[0], "the max_size should be larger than the width of max_reso"
-                assert max_size >= max_reso[1], "the max_size should be larger than the height of max_reso"
+                assert (
+                    max_size >= max_reso[0]
+                ), "the max_size should be larger than the width of max_reso"
+                assert (
+                    max_size >= max_reso[1]
+                ), "the max_size should be larger than the height of max_reso"
             if min_size is not None:
-                assert max_size >= min_size, "the max_size should be larger than the min_size"
+                assert (
+                    max_size >= min_size
+                ), "the max_size should be larger than the min_size"
 
         self.no_upscale = no_upscale
         if max_reso is None:
@@ -221,7 +273,9 @@ class BucketManager:
 
         self.resos = []
         self.reso_to_id = {}
-        self.buckets = []  # 前処理時は (image_key, image, original size, crop left/top)、学習時は image_key
+        self.buckets = (
+            []
+        )  # 前処理時は (image_key, image, original size, crop left/top)、学習時は image_key
 
     def add_image(self, reso, image_or_info):
         bucket_id = self.reso_to_id[reso]
@@ -248,7 +302,9 @@ class BucketManager:
         self.reso_to_id = sorted_reso_to_id
 
     def make_buckets(self):
-        resos = model_util.make_bucket_resolutions(self.max_reso, self.min_size, self.max_size, self.reso_steps)
+        resos = model_util.make_bucket_resolutions(
+            self.max_reso, self.min_size, self.max_size, self.reso_steps
+        )
         self.set_predefined_resos(resos)
 
     def set_predefined_resos(self, resos):
@@ -279,7 +335,9 @@ class BucketManager:
                 pass
             else:
                 ar_errors = np.log(self.predefined_aspect_ratios) - np.log(aspect_ratio)
-                predefined_bucket_id = np.abs(ar_errors).argmin()  # 当該解像度以外でaspect ratio errorが最も少ないもの
+                predefined_bucket_id = np.abs(
+                    ar_errors
+                ).argmin()  # 当該解像度以外でaspect ratio errorが最も少ないもの
                 reso = self.predefined_resos[predefined_bucket_id]
 
             ar_reso = reso[0] / reso[1]
@@ -288,7 +346,10 @@ class BucketManager:
             else:
                 scale = reso[0] / image_width
 
-            resized_size = (int(image_width * scale + 0.5), int(image_height * scale + 0.5))
+            resized_size = (
+                int(image_width * scale + 0.5),
+                int(image_height * scale + 0.5),
+            )
             # logger.info(f"use predef, {image_width}, {image_height}, {reso}, {resized_size}")
         else:
             # 縮小のみを行う
@@ -296,7 +357,9 @@ class BucketManager:
                 # 画像が大きすぎるのでアスペクト比を保ったまま縮小することを前提にbucketを決める
                 resized_width = math.sqrt(self.max_area * aspect_ratio)
                 resized_height = self.max_area / resized_width
-                assert abs(resized_width / resized_height - aspect_ratio) < 1e-2, "aspect is illegal"
+                assert (
+                    abs(resized_width / resized_height - aspect_ratio) < 1e-2
+                ), "aspect is illegal"
 
                 # リサイズ後の短辺または長辺をreso_steps単位にする：aspect ratioの差が少ないほうを選ぶ
                 # 元のbucketingと同じロジック
@@ -311,10 +374,18 @@ class BucketManager:
                 # logger.info(b_width_rounded, b_height_in_wr, ar_width_rounded)
                 # logger.info(b_width_in_hr, b_height_rounded, ar_height_rounded)
 
-                if abs(ar_width_rounded - aspect_ratio) < abs(ar_height_rounded - aspect_ratio):
-                    resized_size = (b_width_rounded, int(b_width_rounded / aspect_ratio + 0.5))
+                if abs(ar_width_rounded - aspect_ratio) < abs(
+                    ar_height_rounded - aspect_ratio
+                ):
+                    resized_size = (
+                        b_width_rounded,
+                        int(b_width_rounded / aspect_ratio + 0.5),
+                    )
                 else:
-                    resized_size = (int(b_height_rounded * aspect_ratio + 0.5), b_height_rounded)
+                    resized_size = (
+                        int(b_height_rounded * aspect_ratio + 0.5),
+                        b_height_rounded,
+                    )
                 # logger.info(resized_size)
             else:
                 resized_size = (image_width, image_height)  # リサイズは不要
@@ -391,7 +462,9 @@ class AugHelper:
 
         return {"image": image}
 
-    def get_augmentor(self, use_color_aug: bool):  # -> Optional[Callable[[np.ndarray], Dict[str, np.ndarray]]]:
+    def get_augmentor(
+        self, use_color_aug: bool
+    ):  # -> Optional[Callable[[np.ndarray], Dict[str, np.ndarray]]]:
         return self.color_aug if use_color_aug else None
 
 
@@ -444,7 +517,9 @@ class BaseSubset:
         self.token_warmup_min = token_warmup_min  # step=0におけるタグの数
         self.token_warmup_step = token_warmup_step  # N（N<1ならN*max_train_steps）ステップ目でタグの数が最大になる
 
-        self.custom_attributes = custom_attributes if custom_attributes is not None else {}
+        self.custom_attributes = (
+            custom_attributes if custom_attributes is not None else {}
+        )
 
         self.img_count = 0
 
@@ -654,7 +729,10 @@ class ControlNetSubset(BaseSubset):
     def __eq__(self, other) -> bool:
         if not isinstance(other, ControlNetSubset):
             return NotImplemented
-        return self.image_dir == other.image_dir and self.conditioning_data_dir == other.conditioning_data_dir
+        return (
+            self.image_dir == other.image_dir
+            and self.conditioning_data_dir == other.conditioning_data_dir
+        )
 
 
 class BaseDataset(torch.utils.data.Dataset):
@@ -686,7 +764,9 @@ class BaseDataset(torch.utils.data.Dataset):
         self.bucket_no_upscale = None
         self.bucket_info = None  # for metadata
 
-        self.current_epoch: int = 0  # インスタンスがepochごとに新しく作られるようなので外側から渡さないとダメ
+        self.current_epoch: int = (
+            0  # インスタンスがepochごとに新しく作られるようなので外側から渡さないとダメ
+        )
 
         self.current_step: int = 0
         self.max_train_steps: int = 0
@@ -711,24 +791,44 @@ class BaseDataset(torch.utils.data.Dataset):
 
     def set_current_strategies(self):
         self.tokenize_strategy = TokenizeStrategy.get_strategy()
-        self.text_encoder_output_caching_strategy = TextEncoderOutputsCachingStrategy.get_strategy()
+        self.text_encoder_output_caching_strategy = (
+            TextEncoderOutputsCachingStrategy.get_strategy()
+        )
         self.latents_caching_strategy = LatentsCachingStrategy.get_strategy()
 
     def adjust_min_max_bucket_reso_by_steps(
-        self, resolution: Tuple[int, int], min_bucket_reso: int, max_bucket_reso: int, bucket_reso_steps: int
+        self,
+        resolution: Tuple[int, int],
+        min_bucket_reso: int,
+        max_bucket_reso: int,
+        bucket_reso_steps: int,
     ) -> Tuple[int, int]:
         # make min/max bucket reso to be multiple of bucket_reso_steps
         if min_bucket_reso % bucket_reso_steps != 0:
-            adjusted_min_bucket_reso = min_bucket_reso - min_bucket_reso % bucket_reso_steps
-            logger.warning(f"min_bucket_reso is adjusted to be multiple of bucket_reso_steps: {min_bucket_reso} -> {adjusted_min_bucket_reso}")
+            adjusted_min_bucket_reso = (
+                min_bucket_reso - min_bucket_reso % bucket_reso_steps
+            )
+            logger.warning(
+                f"min_bucket_reso is adjusted to be multiple of bucket_reso_steps: {min_bucket_reso} -> {adjusted_min_bucket_reso}"
+            )
             min_bucket_reso = adjusted_min_bucket_reso
         if max_bucket_reso % bucket_reso_steps != 0:
-            adjusted_max_bucket_reso = max_bucket_reso + bucket_reso_steps - max_bucket_reso % bucket_reso_steps
-            logger.warning(f"max_bucket_reso is adjusted to be multiple of bucket_reso_steps: {max_bucket_reso} -> {adjusted_max_bucket_reso}")
+            adjusted_max_bucket_reso = (
+                max_bucket_reso
+                + bucket_reso_steps
+                - max_bucket_reso % bucket_reso_steps
+            )
+            logger.warning(
+                f"max_bucket_reso is adjusted to be multiple of bucket_reso_steps: {max_bucket_reso} -> {adjusted_max_bucket_reso}"
+            )
             max_bucket_reso = adjusted_max_bucket_reso
 
-        assert min(resolution) >= min_bucket_reso, "min_bucket_reso must be equal or less than resolution"
-        assert max(resolution) <= max_bucket_reso, "max_bucket_reso must be equal or greater than resolution"
+        assert (
+            min(resolution) >= min_bucket_reso
+        ), "min_bucket_reso must be equal or less than resolution"
+        assert (
+            max(resolution) <= max_bucket_reso
+        ), "max_bucket_reso must be equal or greater than resolution"
 
         return min_bucket_reso, max_bucket_reso
 
@@ -739,16 +839,22 @@ class BaseDataset(torch.utils.data.Dataset):
         self.caching_mode = mode
 
     def set_current_epoch(self, epoch):
-        if not self.current_epoch == epoch:  # epochが切り替わったらバケツをシャッフルする
+        if (
+            not self.current_epoch == epoch
+        ):  # epochが切り替わったらバケツをシャッフルする
             if epoch > self.current_epoch:
-                #logger.info("epoch is incremented. current_epoch: {}, epoch: {}".format(self.current_epoch, epoch))
+                # logger.info("epoch is incremented. current_epoch: {}, epoch: {}".format(self.current_epoch, epoch))
                 num_epochs = epoch - self.current_epoch
                 for _ in range(num_epochs):
                     self.current_epoch += 1
                     self.shuffle_buckets()
                 # self.current_epoch seem to be set to 0 again in the next epoch. it may be caused by skipped_dataloader?
             else:
-                logger.warning("epoch is not incremented. current_epoch: {}, epoch: {}".format(self.current_epoch, epoch))
+                logger.warning(
+                    "epoch is not incremented. current_epoch: {}, epoch: {}".format(
+                        self.current_epoch, epoch
+                    )
+                )
                 self.current_epoch = epoch
 
     def set_current_step(self, step):
@@ -786,7 +892,10 @@ class BaseDataset(torch.utils.data.Dataset):
             caption = caption + " " + subset.caption_suffix
 
         # dropoutの決定：tag dropがこのメソッド内にあるのでここで行うのが良い
-        is_drop_out = subset.caption_dropout_rate > 0 and random.random() < subset.caption_dropout_rate
+        is_drop_out = (
+            subset.caption_dropout_rate > 0
+            and random.random() < subset.caption_dropout_rate
+        )
         is_drop_out = (
             is_drop_out
             or subset.caption_dropout_every_n_epochs > 0
@@ -824,7 +933,11 @@ class BaseDataset(torch.utils.data.Dataset):
                 # if caption is multiline, use the first line
                 caption = caption.split("\n")[0]
 
-            if subset.shuffle_caption or subset.token_warmup_step > 0 or subset.caption_tag_dropout_rate > 0:
+            if (
+                subset.shuffle_caption
+                or subset.token_warmup_step > 0
+                or subset.caption_tag_dropout_rate > 0
+            ):
                 fixed_tokens = []
                 flex_tokens = []
                 fixed_suffix_tokens = []
@@ -833,26 +946,54 @@ class BaseDataset(torch.utils.data.Dataset):
                     and subset.keep_tokens_separator
                     and subset.keep_tokens_separator in caption
                 ):
-                    fixed_part, flex_part = caption.split(subset.keep_tokens_separator, 1)
+                    fixed_part, flex_part = caption.split(
+                        subset.keep_tokens_separator, 1
+                    )
                     if subset.keep_tokens_separator in flex_part:
-                        flex_part, fixed_suffix_part = flex_part.split(subset.keep_tokens_separator, 1)
-                        fixed_suffix_tokens = [t.strip() for t in fixed_suffix_part.split(subset.caption_separator) if t.strip()]
+                        flex_part, fixed_suffix_part = flex_part.split(
+                            subset.keep_tokens_separator, 1
+                        )
+                        fixed_suffix_tokens = [
+                            t.strip()
+                            for t in fixed_suffix_part.split(subset.caption_separator)
+                            if t.strip()
+                        ]
 
-                    fixed_tokens = [t.strip() for t in fixed_part.split(subset.caption_separator) if t.strip()]
-                    flex_tokens = [t.strip() for t in flex_part.split(subset.caption_separator) if t.strip()]
+                    fixed_tokens = [
+                        t.strip()
+                        for t in fixed_part.split(subset.caption_separator)
+                        if t.strip()
+                    ]
+                    flex_tokens = [
+                        t.strip()
+                        for t in flex_part.split(subset.caption_separator)
+                        if t.strip()
+                    ]
                 else:
-                    tokens = [t.strip() for t in caption.strip().split(subset.caption_separator)]
+                    tokens = [
+                        t.strip()
+                        for t in caption.strip().split(subset.caption_separator)
+                    ]
                     flex_tokens = tokens[:]
                     if subset.keep_tokens > 0:
                         fixed_tokens = flex_tokens[: subset.keep_tokens]
                         flex_tokens = tokens[subset.keep_tokens :]
 
                 if subset.token_warmup_step < 1:  # 初回に上書きする
-                    subset.token_warmup_step = math.floor(subset.token_warmup_step * self.max_train_steps)
-                if subset.token_warmup_step and self.current_step < subset.token_warmup_step:
+                    subset.token_warmup_step = math.floor(
+                        subset.token_warmup_step * self.max_train_steps
+                    )
+                if (
+                    subset.token_warmup_step
+                    and self.current_step < subset.token_warmup_step
+                ):
                     tokens_len = (
                         math.floor(
-                            (self.current_step) * ((len(flex_tokens) - subset.token_warmup_min) / (subset.token_warmup_step))
+                            (self.current_step)
+                            * (
+                                (len(flex_tokens) - subset.token_warmup_min)
+                                / (subset.token_warmup_step)
+                            )
                         )
                         + subset.token_warmup_min
                     )
@@ -874,15 +1015,19 @@ class BaseDataset(torch.utils.data.Dataset):
 
                 caption = ", ".join(fixed_tokens + flex_tokens + fixed_suffix_tokens)
             elif (
-                    hasattr(subset, "keep_tokens_separator")
-                    and subset.keep_tokens_separator
-                    and subset.keep_tokens_separator in caption
-                 ):
-                caption = ", ".join(c.strip() for c in caption.split(subset.keep_tokens_separator))
+                hasattr(subset, "keep_tokens_separator")
+                and subset.keep_tokens_separator
+                and subset.keep_tokens_separator in caption
+            ):
+                caption = ", ".join(
+                    c.strip() for c in caption.split(subset.keep_tokens_separator)
+                )
 
             # process secondary separator
             if subset.secondary_separator:
-                caption = caption.replace(subset.secondary_separator, subset.caption_separator)
+                caption = caption.replace(
+                    subset.secondary_separator, subset.caption_separator
+                )
 
             # textual inversion対応
             for str_from, str_to in self.replacements.items():
@@ -902,7 +1047,11 @@ class BaseDataset(torch.utils.data.Dataset):
             tokenizer = self.tokenizers[0]
 
         input_ids = tokenizer(
-            caption, padding="max_length", truncation=True, max_length=self.tokenizer_max_length, return_tensors="pt"
+            caption,
+            padding="max_length",
+            truncation=True,
+            max_length=self.tokenizer_max_length,
+            return_tensors="pt",
         ).input_ids
 
         if self.tokenizer_max_length > tokenizer.model_max_length:
@@ -913,7 +1062,9 @@ class BaseDataset(torch.utils.data.Dataset):
                 # 77以上の時は "<BOS> .... <EOS> <EOS> <EOS>" でトータル227とかになっているので、"<BOS>...<EOS>"の三連に変換する
                 # 1111氏のやつは , で区切る、とかしているようだが　とりあえず単純に
                 for i in range(
-                    1, self.tokenizer_max_length - tokenizer.model_max_length + 2, tokenizer.model_max_length - 2
+                    1,
+                    self.tokenizer_max_length - tokenizer.model_max_length + 2,
+                    tokenizer.model_max_length - 2,
                 ):  # (1, 152, 75)
                     ids_chunk = (
                         input_ids[0].unsqueeze(0),
@@ -925,7 +1076,11 @@ class BaseDataset(torch.utils.data.Dataset):
             else:
                 # v2 or SDXL
                 # 77以上の時は "<BOS> .... <EOS> <PAD> <PAD>..." でトータル227とかになっているので、"<BOS>...<EOS> <PAD> <PAD> ..."の三連に変換する
-                for i in range(1, self.tokenizer_max_length - tokenizer.model_max_length + 2, tokenizer.model_max_length - 2):
+                for i in range(
+                    1,
+                    self.tokenizer_max_length - tokenizer.model_max_length + 2,
+                    tokenizer.model_max_length - 2,
+                ):
                     ids_chunk = (
                         input_ids[0].unsqueeze(0),  # BOS
                         input_ids[i : i + tokenizer.model_max_length - 2],
@@ -935,7 +1090,10 @@ class BaseDataset(torch.utils.data.Dataset):
 
                     # 末尾が <EOS> <PAD> または <PAD> <PAD> の場合は、何もしなくてよい
                     # 末尾が x <PAD/EOS> の場合は末尾を <EOS> に変える（x <EOS> なら結果的に変化なし）
-                    if ids_chunk[-2] != tokenizer.eos_token_id and ids_chunk[-2] != tokenizer.pad_token_id:
+                    if (
+                        ids_chunk[-2] != tokenizer.eos_token_id
+                        and ids_chunk[-2] != tokenizer.pad_token_id
+                    ):
                         ids_chunk[-1] = tokenizer.eos_token_id
                     # 先頭が <BOS> <PAD> ... の場合は <BOS> <EOS> <PAD> ... に変える
                     if ids_chunk[1] == tokenizer.pad_token_id:
@@ -984,7 +1142,9 @@ class BaseDataset(torch.utils.data.Dataset):
 
         # bucketを作成し、画像をbucketに振り分ける
         if self.enable_bucket:
-            if self.bucket_manager is None:  # fine tuningの場合でmetadataに定義がある場合は、すでに初期化済み
+            if (
+                self.bucket_manager is None
+            ):  # fine tuningの場合でmetadataに定義がある場合は、すでに初期化済み
                 self.bucket_manager = BucketManager(
                     self.bucket_no_upscale,
                     (self.width, self.height),
@@ -1002,8 +1162,8 @@ class BaseDataset(torch.utils.data.Dataset):
             img_ar_errors = []
             for image_info in self.image_data.values():
                 image_width, image_height = image_info.image_size
-                image_info.bucket_reso, image_info.resized_size, ar_error = self.bucket_manager.select_bucket(
-                    image_width, image_height
+                image_info.bucket_reso, image_info.resized_size, ar_error = (
+                    self.bucket_manager.select_bucket(image_width, image_height)
                 )
 
                 # logger.info(image_info.image_key, image_info.bucket_reso)
@@ -1011,24 +1171,37 @@ class BaseDataset(torch.utils.data.Dataset):
 
             self.bucket_manager.sort()
         else:
-            self.bucket_manager = BucketManager(False, (self.width, self.height), None, None, None)
-            self.bucket_manager.set_predefined_resos([(self.width, self.height)])  # ひとつの固定サイズbucketのみ
+            self.bucket_manager = BucketManager(
+                False, (self.width, self.height), None, None, None
+            )
+            self.bucket_manager.set_predefined_resos(
+                [(self.width, self.height)]
+            )  # ひとつの固定サイズbucketのみ
             for image_info in self.image_data.values():
                 image_width, image_height = image_info.image_size
-                image_info.bucket_reso, image_info.resized_size, _ = self.bucket_manager.select_bucket(image_width, image_height)
+                image_info.bucket_reso, image_info.resized_size, _ = (
+                    self.bucket_manager.select_bucket(image_width, image_height)
+                )
 
         for image_info in self.image_data.values():
             for _ in range(image_info.num_repeats):
-                self.bucket_manager.add_image(image_info.bucket_reso, image_info.image_key)
+                self.bucket_manager.add_image(
+                    image_info.bucket_reso, image_info.image_key
+                )
 
         # bucket情報を表示、格納する
         if self.enable_bucket:
             self.bucket_info = {"buckets": {}}
             logger.info("number of images (including repeats)")
-            for i, (reso, bucket) in enumerate(zip(self.bucket_manager.resos, self.bucket_manager.buckets)):
+            for i, (reso, bucket) in enumerate(
+                zip(self.bucket_manager.resos, self.bucket_manager.buckets)
+            ):
                 count = len(bucket)
                 if count > 0:
-                    self.bucket_info["buckets"][i] = {"resolution": reso, "count": len(bucket)}
+                    self.bucket_info["buckets"][i] = {
+                        "resolution": reso,
+                        "count": len(bucket),
+                    }
                     logger.info(f"bucket {i}: resolution {reso}, count: {len(bucket)}")
 
             img_ar_errors = np.array(img_ar_errors)
@@ -1041,7 +1214,9 @@ class BaseDataset(torch.utils.data.Dataset):
         for bucket_index, bucket in enumerate(self.bucket_manager.buckets):
             batch_count = int(math.ceil(len(bucket) / self.batch_size))
             for batch_index in range(batch_count):
-                self.buckets_indices.append(BucketBatchIndex(bucket_index, self.batch_size, batch_index))
+                self.buckets_indices.append(
+                    BucketBatchIndex(bucket_index, self.batch_size, batch_index)
+                )
 
         self.shuffle_buckets()
         self._length = len(self.buckets_indices)
@@ -1054,12 +1229,14 @@ class BaseDataset(torch.utils.data.Dataset):
         self.bucket_manager.shuffle()
 
     def verify_bucket_reso_steps(self, min_steps: int):
-        assert self.bucket_reso_steps is None or self.bucket_reso_steps % min_steps == 0, (
-            f"bucket_reso_steps is {self.bucket_reso_steps}. it must be divisible by {min_steps}."
-        )
+        assert (
+            self.bucket_reso_steps is None or self.bucket_reso_steps % min_steps == 0
+        ), f"bucket_reso_steps is {self.bucket_reso_steps}. it must be divisible by {min_steps}."
 
     def is_latent_cacheable(self):
-        return all([not subset.color_aug and not subset.random_crop for subset in self.subsets])
+        return all(
+            [not subset.color_aug and not subset.random_crop for subset in self.subsets]
+        )
 
     def is_text_encoder_output_cacheable(self):
         return all(
@@ -1114,7 +1291,9 @@ class BaseDataset(torch.utils.data.Dataset):
             for info in batch:
                 if info.image is not None and isinstance(info.image, Future):
                     info.image = info.image.result()  # future to image
-            caching_strategy.cache_batch_latents(model, batch, cond.flip_aug, cond.alpha_mask, cond.random_crop)
+            caching_strategy.cache_batch_latents(
+                model, batch, cond.flip_aug, cond.alpha_mask, cond.random_crop
+            )
 
             # remove image from memory
             for info in batch:
@@ -1123,7 +1302,9 @@ class BaseDataset(torch.utils.data.Dataset):
         # define ThreadPoolExecutor to load images in parallel
         max_workers = min(os.cpu_count(), len(image_infos))
         max_workers = max(1, max_workers // num_processes)  # consider multi-gpu
-        max_workers = min(max_workers, caching_strategy.batch_size)  # max_workers should be less than batch_size
+        max_workers = min(
+            max_workers, caching_strategy.batch_size
+        )  # max_workers should be less than batch_size
         executor = ThreadPoolExecutor(max_workers)
 
         try:
@@ -1138,7 +1319,9 @@ class BaseDataset(torch.utils.data.Dataset):
                 # check disk cache exists and size of latents
                 if caching_strategy.cache_to_disk:
                     # info.latents_npz = os.path.splitext(info.absolute_path)[0] + file_suffix
-                    info.latents_npz = caching_strategy.get_latents_npz_path(info.absolute_path, info.image_size)
+                    info.latents_npz = caching_strategy.get_latents_npz_path(
+                        info.absolute_path, info.image_size
+                    )
 
                     # if the modulo of num_processes is not equal to process_index, skip caching
                     # this makes each process cache different latents
@@ -1148,20 +1331,30 @@ class BaseDataset(torch.utils.data.Dataset):
                     # print(f"{process_index}/{num_processes} {i}/{len(image_infos)} {info.latents_npz}")
 
                     cache_available = caching_strategy.is_disk_cached_latents_expected(
-                        info.bucket_reso, info.latents_npz, subset.flip_aug, subset.alpha_mask
+                        info.bucket_reso,
+                        info.latents_npz,
+                        subset.flip_aug,
+                        subset.alpha_mask,
                     )
                     if cache_available:  # do not add to batch
                         continue
 
                 # if batch is not empty and condition is changed, flush the batch. Note that current_condition is not None if batch is not empty
-                condition = Condition(info.bucket_reso, subset.flip_aug, subset.alpha_mask, subset.random_crop)
+                condition = Condition(
+                    info.bucket_reso,
+                    subset.flip_aug,
+                    subset.alpha_mask,
+                    subset.random_crop,
+                )
                 if len(batch) > 0 and current_condition != condition:
                     submit_batch(batch, current_condition)
                     batch = []
 
                 if info.image is None:
                     # load image in parallel
-                    info.image = executor.submit(load_image, info.absolute_path, condition.alpha_mask)
+                    info.image = executor.submit(
+                        load_image, info.absolute_path, condition.alpha_mask
+                    )
 
                 batch.append(info)
                 current_condition = condition
@@ -1178,7 +1371,14 @@ class BaseDataset(torch.utils.data.Dataset):
         finally:
             executor.shutdown()
 
-    def cache_latents(self, vae, vae_batch_size=1, cache_to_disk=False, is_main_process=True, file_suffix=".npz"):
+    def cache_latents(
+        self,
+        vae,
+        vae_batch_size=1,
+        cache_to_disk=False,
+        is_main_process=True,
+        file_suffix=".npz",
+    ):
         # マルチGPUには対応していないので、そちらはtools/cache_latents.pyを使うこと
         logger.info("caching latents.")
 
@@ -1221,14 +1421,19 @@ class BaseDataset(torch.utils.data.Dataset):
                     continue
 
                 cache_available = is_disk_cached_latents_is_expected(
-                    info.bucket_reso, info.latents_npz, subset.flip_aug, subset.alpha_mask
+                    info.bucket_reso,
+                    info.latents_npz,
+                    subset.flip_aug,
+                    subset.alpha_mask,
                 )
 
                 if cache_available:  # do not add to batch
                     continue
 
             # if batch is not empty and condition is changed, flush the batch. Note that current_condition is not None if batch is not empty
-            condition = Condition(info.bucket_reso, subset.flip_aug, subset.alpha_mask, subset.random_crop)
+            condition = Condition(
+                info.bucket_reso, subset.flip_aug, subset.alpha_mask, subset.random_crop
+            )
             if len(batch) > 0 and current_condition != condition:
                 batches.append((current_condition, batch))
                 batch = []
@@ -1245,15 +1450,26 @@ class BaseDataset(torch.utils.data.Dataset):
         if len(batch) > 0:
             batches.append((current_condition, batch))
 
-        if cache_to_disk and not is_main_process:  # if cache to disk, don't cache latents in non-main process, set to info only
+        if (
+            cache_to_disk and not is_main_process
+        ):  # if cache to disk, don't cache latents in non-main process, set to info only
             return
 
         # iterate batches: batch doesn't have image, image will be loaded in cache_batch_latents and discarded
         logger.info("caching latents...")
         for condition, batch in tqdm(batches, smoothing=1, total=len(batches)):
-            cache_batch_latents(vae, cache_to_disk, batch, condition.flip_aug, condition.alpha_mask, condition.random_crop)
+            cache_batch_latents(
+                vae,
+                cache_to_disk,
+                batch,
+                condition.flip_aug,
+                condition.alpha_mask,
+                condition.random_crop,
+            )
 
-    def new_cache_text_encoder_outputs(self, models: List[Any], accelerator: Accelerator):
+    def new_cache_text_encoder_outputs(
+        self, models: List[Any], accelerator: Accelerator
+    ):
         r"""
         a brand new method to cache text encoder outputs. This method caches text encoder outputs with caching strategy.
         """
@@ -1278,14 +1494,18 @@ class BaseDataset(torch.utils.data.Dataset):
             # check disk cache exists and size of text encoder outputs
             if caching_strategy.cache_to_disk:
                 te_out_npz = caching_strategy.get_outputs_npz_path(info.absolute_path)
-                info.text_encoder_outputs_npz = te_out_npz  # set npz filename regardless of cache availability
+                info.text_encoder_outputs_npz = (
+                    te_out_npz  # set npz filename regardless of cache availability
+                )
 
                 # if the modulo of num_processes is not equal to process_index, skip caching
                 # this makes each process cache different text encoder outputs
                 if i % num_processes != process_index:
                     continue
 
-                cache_available = caching_strategy.is_disk_cached_outputs_expected(te_out_npz)
+                cache_available = caching_strategy.is_disk_cached_outputs_expected(
+                    te_out_npz
+                )
                 if cache_available:  # do not add to batch
                     continue
 
@@ -1307,22 +1527,44 @@ class BaseDataset(torch.utils.data.Dataset):
         logger.info("caching Text Encoder outputs...")
         for batch in tqdm(batches, smoothing=1, total=len(batches)):
             # cache_batch_latents(vae, cache_to_disk, batch, subset.flip_aug, subset.alpha_mask, subset.random_crop)
-            caching_strategy.cache_batch_outputs(tokenize_strategy, models, text_encoding_strategy, batch)
+            caching_strategy.cache_batch_outputs(
+                tokenize_strategy, models, text_encoding_strategy, batch
+            )
 
     # if weight_dtype is specified, Text Encoder itself and output will be converted to the dtype
     # this method is only for SDXL, but it should be implemented here because it needs to be a method of dataset
     # to support SD1/2, it needs a flag for v2, but it is postponed
     def cache_text_encoder_outputs(
-        self, tokenizers, text_encoders, device, output_dtype, cache_to_disk=False, is_main_process=True
+        self,
+        tokenizers,
+        text_encoders,
+        device,
+        output_dtype,
+        cache_to_disk=False,
+        is_main_process=True,
     ):
         assert len(tokenizers) == 2, "only support SDXL"
         return self.cache_text_encoder_outputs_common(
-            tokenizers, text_encoders, [device, device], output_dtype, [output_dtype], cache_to_disk, is_main_process
+            tokenizers,
+            text_encoders,
+            [device, device],
+            output_dtype,
+            [output_dtype],
+            cache_to_disk,
+            is_main_process,
         )
 
     # same as above, but for SD3
     def cache_text_encoder_outputs_sd3(
-        self, tokenizer, text_encoders, devices, output_dtype, te_dtypes, cache_to_disk=False, is_main_process=True, batch_size=None
+        self,
+        tokenizer,
+        text_encoders,
+        devices,
+        output_dtype,
+        te_dtypes,
+        cache_to_disk=False,
+        is_main_process=True,
+        batch_size=None,
     ):
         return self.cache_text_encoder_outputs_common(
             [tokenizer],
@@ -1376,7 +1618,9 @@ class BaseDataset(torch.utils.data.Dataset):
 
             image_infos_to_cache.append(info)
 
-        if cache_to_disk and not is_main_process:  # if cache to disk, don't cache latents in non-main process, set to info only
+        if (
+            cache_to_disk and not is_main_process
+        ):  # if cache to disk, don't cache latents in non-main process, set to info only
             return
 
         # prepare tokenizers and text encoders
@@ -1413,7 +1657,14 @@ class BaseDataset(torch.utils.data.Dataset):
                 input_ids1 = torch.stack(input_ids1, dim=0)
                 input_ids2 = torch.stack(input_ids2, dim=0)
                 cache_batch_text_encoder_outputs(
-                    infos, tokenizers, text_encoders, self.max_token_length, cache_to_disk, input_ids1, input_ids2, output_dtype
+                    infos,
+                    tokenizers,
+                    text_encoders,
+                    self.max_token_length,
+                    cache_to_disk,
+                    input_ids1,
+                    input_ids2,
+                    output_dtype,
                 )
         else:
             for batch in tqdm(batches):
@@ -1436,7 +1687,7 @@ class BaseDataset(torch.utils.data.Dataset):
 
     def get_image_size(self, image_path):
         if image_path.endswith(".jxl"):
-            with open(image_path, 'rb') as fp:
+            with open(image_path, "rb") as fp:
                 image_size = get_jxl_metadata_from_bytesio(fp)
         else:
             image_size = imagesize.get(image_path)
@@ -1451,8 +1702,9 @@ class BaseDataset(torch.utils.data.Dataset):
                 image_size = (0, 0)
         return image_size
 
-
-    def load_image_with_face_info(self, subset: BaseSubset, image_path: str, alpha_mask=False):
+    def load_image_with_face_info(
+        self, subset: BaseSubset, image_path: str, alpha_mask=False
+    ):
         img = load_image(image_path, alpha_mask)
 
         face_cx = face_cy = face_w = face_h = 0
@@ -1475,9 +1727,15 @@ class BaseDataset(torch.utils.data.Dataset):
         # 画像サイズはsizeより大きいのでリサイズする
         face_size = max(face_w, face_h)
         size = min(self.height, self.width)  # 短いほう
-        min_scale = max(self.height / height, self.width / width)  # 画像がモデル入力サイズぴったりになる倍率（最小の倍率）
-        min_scale = min(1.0, max(min_scale, size / (face_size * subset.face_crop_aug_range[1])))  # 指定した顔最小サイズ
-        max_scale = min(1.0, max(min_scale, size / (face_size * subset.face_crop_aug_range[0])))  # 指定した顔最大サイズ
+        min_scale = max(
+            self.height / height, self.width / width
+        )  # 画像がモデル入力サイズぴったりになる倍率（最小の倍率）
+        min_scale = min(
+            1.0, max(min_scale, size / (face_size * subset.face_crop_aug_range[1]))
+        )  # 指定した顔最小サイズ
+        max_scale = min(
+            1.0, max(min_scale, size / (face_size * subset.face_crop_aug_range[0]))
+        )  # 指定した顔最大サイズ
         if min_scale >= max_scale:  # range指定がmin==max
             scale = min_scale
         else:
@@ -1485,20 +1743,28 @@ class BaseDataset(torch.utils.data.Dataset):
 
         nh = int(height * scale + 0.5)
         nw = int(width * scale + 0.5)
-        assert nh >= self.height and nw >= self.width, f"internal error. small scale {scale}, {width}*{height}"
+        assert (
+            nh >= self.height and nw >= self.width
+        ), f"internal error. small scale {scale}, {width}*{height}"
         image = cv2.resize(image, (nw, nh), interpolation=cv2.INTER_AREA)
         face_cx = int(face_cx * scale + 0.5)
         face_cy = int(face_cy * scale + 0.5)
         height, width = nh, nw
 
         # 顔を中心として448*640とかへ切り出す
-        for axis, (target_size, length, face_p) in enumerate(zip((self.height, self.width), (height, width), (face_cy, face_cx))):
+        for axis, (target_size, length, face_p) in enumerate(
+            zip((self.height, self.width), (height, width), (face_cy, face_cx))
+        ):
             p1 = face_p - target_size // 2  # 顔を中心に持ってくるための切り出し位置
 
             if subset.random_crop:
                 # 背景も含めるために顔を中心に置く確率を高めつつずらす
-                range = max(length - face_p, face_p)  # 画像の端から顔中心までの距離の長いほう
-                p1 = p1 + (random.randint(0, range) + random.randint(0, range)) - range  # -range ~ +range までのいい感じの乱数
+                range = max(
+                    length - face_p, face_p
+                )  # 画像の端から顔中心までの距離の長いほう
+                p1 = (
+                    p1 + (random.randint(0, range) + random.randint(0, range)) - range
+                )  # -range ~ +range までのいい感じの乱数
             else:
                 # range指定があるときのみ、すこしだけランダムに（わりと適当）
                 if subset.face_crop_aug_range[0] != subset.face_crop_aug_range[1]:
@@ -1522,7 +1788,9 @@ class BaseDataset(torch.utils.data.Dataset):
         bucket_batch_size = self.buckets_indices[index].bucket_batch_size
         image_index = self.buckets_indices[index].batch_index * bucket_batch_size
 
-        if self.caching_mode is not None:  # return batch for latents/text encoder outputs caching
+        if (
+            self.caching_mode is not None
+        ):  # return batch for latents/text encoder outputs caching
             return self.get_item_for_caching(bucket, bucket_batch_size, image_index)
 
         loss_weights = []
@@ -1547,7 +1815,9 @@ class BaseDataset(torch.utils.data.Dataset):
             # in case of fine tuning, is_reg is always False
             loss_weights.append(self.prior_loss_weight if image_info.is_reg else 1.0)
 
-            flipped = subset.flip_aug and random.random() < 0.5  # not flipped or flipped with 50% chance
+            flipped = (
+                subset.flip_aug and random.random() < 0.5
+            )  # not flipped or flipped with 50% chance
 
             # image/latentsを処理する
             if image_info.latents is not None:  # cache_latents=Trueの場合
@@ -1558,16 +1828,26 @@ class BaseDataset(torch.utils.data.Dataset):
                     alpha_mask = image_info.alpha_mask
                 else:
                     latents = image_info.latents_flipped
-                    alpha_mask = None if image_info.alpha_mask is None else torch.flip(image_info.alpha_mask, [1])
+                    alpha_mask = (
+                        None
+                        if image_info.alpha_mask is None
+                        else torch.flip(image_info.alpha_mask, [1])
+                    )
 
                 image = None
-            elif image_info.latents_npz is not None:  # FineTuningDatasetまたはcache_latents_to_disk=Trueの場合
+            elif (
+                image_info.latents_npz is not None
+            ):  # FineTuningDatasetまたはcache_latents_to_disk=Trueの場合
                 latents, original_size, crop_ltrb, flipped_latents, alpha_mask = (
-                    self.latents_caching_strategy.load_latents_from_disk(image_info.latents_npz, image_info.bucket_reso)
+                    self.latents_caching_strategy.load_latents_from_disk(
+                        image_info.latents_npz, image_info.bucket_reso
+                    )
                 )
                 if flipped:
                     latents = flipped_latents
-                    alpha_mask = None if alpha_mask is None else alpha_mask[:, ::-1].copy()  # copy to avoid negative stride problem
+                    alpha_mask = (
+                        None if alpha_mask is None else alpha_mask[:, ::-1].copy()
+                    )  # copy to avoid negative stride problem
                     del flipped_latents
                 latents = torch.FloatTensor(latents)
                 if alpha_mask is not None:
@@ -1583,11 +1863,16 @@ class BaseDataset(torch.utils.data.Dataset):
 
                 if self.enable_bucket:
                     img, original_size, crop_ltrb = trim_and_resize_if_required(
-                        subset.random_crop, img, image_info.bucket_reso, image_info.resized_size
+                        subset.random_crop,
+                        img,
+                        image_info.bucket_reso,
+                        image_info.resized_size,
                     )
                 else:
                     if face_cx > 0:  # 顔位置情報あり
-                        img = self.crop_target(subset, img, face_cx, face_cy, face_w, face_h)
+                        img = self.crop_target(
+                            subset, img, face_cx, face_cy, face_w, face_h
+                        )
                     elif im_h > self.height or im_w > self.width:
                         assert (
                             subset.random_crop
@@ -1616,7 +1901,9 @@ class BaseDataset(torch.utils.data.Dataset):
                     img[:, :, :3] = img_rgb
 
                 if flipped:
-                    img = img[:, ::-1, :].copy()  # copy to avoid negative stride problem
+                    img = img[
+                        :, ::-1, :
+                    ].copy()  # copy to avoid negative stride problem
 
                 if subset.alpha_mask:
                     if img.shape[2] == 4:
@@ -1624,7 +1911,9 @@ class BaseDataset(torch.utils.data.Dataset):
                         alpha_mask = alpha_mask.astype(np.float32) / 255.0  # 0.0~1.0
                         alpha_mask = torch.FloatTensor(alpha_mask)
                     else:
-                        alpha_mask = torch.ones((img.shape[0], img.shape[1]), dtype=torch.float32)
+                        alpha_mask = torch.ones(
+                            (img.shape[0], img.shape[1]), dtype=torch.float32
+                        )
                 else:
                     alpha_mask = None
 
@@ -1638,7 +1927,11 @@ class BaseDataset(torch.utils.data.Dataset):
             latents_list.append(latents)
             alpha_mask_list.append(alpha_mask)
 
-            target_size = (image.shape[2], image.shape[1]) if image is not None else (latents.shape[2] * 8, latents.shape[1] * 8)
+            target_size = (
+                (image.shape[2], image.shape[1])
+                if image is not None
+                else (latents.shape[2] * 8, latents.shape[1] * 8)
+            )
 
             if not flipped:
                 crop_left_top = (crop_ltrb[0], crop_ltrb[1])
@@ -1655,7 +1948,8 @@ class BaseDataset(torch.utils.data.Dataset):
             caption = image_info.caption  # default
 
             tokenization_required = (
-                self.text_encoder_output_caching_strategy is None or self.text_encoder_output_caching_strategy.is_partial
+                self.text_encoder_output_caching_strategy is None
+                or self.text_encoder_output_caching_strategy.is_partial
             )
             text_encoder_outputs = None
             input_ids = None
@@ -1665,8 +1959,10 @@ class BaseDataset(torch.utils.data.Dataset):
                 text_encoder_outputs = image_info.text_encoder_outputs
             elif image_info.text_encoder_outputs_npz is not None:
                 # on disk
-                text_encoder_outputs = self.text_encoder_output_caching_strategy.load_outputs_npz(
-                    image_info.text_encoder_outputs_npz
+                text_encoder_outputs = (
+                    self.text_encoder_output_caching_strategy.load_outputs_npz(
+                        image_info.text_encoder_outputs_npz
+                    )
                 )
             else:
                 tokenization_required = True
@@ -1674,7 +1970,9 @@ class BaseDataset(torch.utils.data.Dataset):
 
             if tokenization_required:
                 caption = self.process_caption(subset, image_info.caption)
-                input_ids = [ids[0] for ids in self.tokenize_strategy.tokenize(caption)]  # remove batch dimension
+                input_ids = [
+                    ids[0] for ids in self.tokenize_strategy.tokenize(caption)
+                ]  # remove batch dimension
                 # if self.XTI_layers:
                 #     caption_layer = []
                 #     for layer in self.XTI_layers:
@@ -1706,15 +2004,25 @@ class BaseDataset(torch.utils.data.Dataset):
 
         def none_or_stack_elements(tensors_list, converter):
             # [[clip_l, clip_g, t5xxl], [clip_l, clip_g, t5xxl], ...] -> [torch.stack(clip_l), torch.stack(clip_g), torch.stack(t5xxl)]
-            if len(tensors_list) == 0 or tensors_list[0] == None or len(tensors_list[0]) == 0 or tensors_list[0][0] is None:
+            if (
+                len(tensors_list) == 0
+                or tensors_list[0] == None
+                or len(tensors_list[0]) == 0
+                or tensors_list[0][0] is None
+            ):
                 return None
-            return [torch.stack([converter(x[i]) for x in tensors_list]) for i in range(len(tensors_list[0]))]
+            return [
+                torch.stack([converter(x[i]) for x in tensors_list])
+                for i in range(len(tensors_list[0]))
+            ]
 
         # set example
         example = {}
         example["custom_attributes"] = custom_attributes  # may be list of empty dict
         example["loss_weights"] = torch.FloatTensor(loss_weights)
-        example["text_encoder_outputs_list"] = none_or_stack_elements(text_encoder_outputs_list, torch.FloatTensor)
+        example["text_encoder_outputs_list"] = none_or_stack_elements(
+            text_encoder_outputs_list, torch.FloatTensor
+        )
         example["input_ids_list"] = none_or_stack_elements(input_ids_list, lambda x: x)
 
         # if one of alpha_masks is not None, we need to replace None with ones
@@ -1725,10 +2033,17 @@ class BaseDataset(torch.utils.data.Dataset):
             for i in range(len(alpha_mask_list)):
                 if alpha_mask_list[i] is None:
                     if images[i] is not None:
-                        alpha_mask_list[i] = torch.ones((images[i].shape[1], images[i].shape[2]), dtype=torch.float32)
+                        alpha_mask_list[i] = torch.ones(
+                            (images[i].shape[1], images[i].shape[2]),
+                            dtype=torch.float32,
+                        )
                     else:
                         alpha_mask_list[i] = torch.ones(
-                            (latents_list[i].shape[1] * 8, latents_list[i].shape[2] * 8), dtype=torch.float32
+                            (
+                                latents_list[i].shape[1] * 8,
+                                latents_list[i].shape[2] * 8,
+                            ),
+                            dtype=torch.float32,
                         )
             example["alpha_masks"] = torch.stack(alpha_mask_list)
         else:
@@ -1741,15 +2056,25 @@ class BaseDataset(torch.utils.data.Dataset):
             images = None
         example["images"] = images
 
-        example["latents"] = torch.stack(latents_list) if latents_list[0] is not None else None
+        example["latents"] = (
+            torch.stack(latents_list) if latents_list[0] is not None else None
+        )
         example["captions"] = captions
 
-        example["original_sizes_hw"] = torch.stack([torch.LongTensor(x) for x in original_sizes_hw])
-        example["crop_top_lefts"] = torch.stack([torch.LongTensor(x) for x in crop_top_lefts])
-        example["target_sizes_hw"] = torch.stack([torch.LongTensor(x) for x in target_sizes_hw])
+        example["original_sizes_hw"] = torch.stack(
+            [torch.LongTensor(x) for x in original_sizes_hw]
+        )
+        example["crop_top_lefts"] = torch.stack(
+            [torch.LongTensor(x) for x in crop_top_lefts]
+        )
+        example["target_sizes_hw"] = torch.stack(
+            [torch.LongTensor(x) for x in target_sizes_hw]
+        )
         example["flippeds"] = flippeds
 
-        example["network_multipliers"] = torch.FloatTensor([self.network_multiplier] * len(captions))
+        example["network_multipliers"] = torch.FloatTensor(
+            [self.network_multiplier] * len(captions)
+        )
 
         if self.debug_dataset:
             example["image_keys"] = bucket[image_index : image_index + self.batch_size]
@@ -1779,11 +2104,19 @@ class BaseDataset(torch.utils.data.Dataset):
             else:
                 # TODO そもそも混在してても動くようにしたほうがいい
                 assert flip_aug == subset.flip_aug, "flip_aug must be same in a batch"
-                assert alpha_mask == subset.alpha_mask, "alpha_mask must be same in a batch"
-                assert random_crop == subset.random_crop, "random_crop must be same in a batch"
-                assert bucket_reso == image_info.bucket_reso, "bucket_reso must be same in a batch"
+                assert (
+                    alpha_mask == subset.alpha_mask
+                ), "alpha_mask must be same in a batch"
+                assert (
+                    random_crop == subset.random_crop
+                ), "random_crop must be same in a batch"
+                assert (
+                    bucket_reso == image_info.bucket_reso
+                ), "bucket_reso must be same in a batch"
 
-            caption = image_info.caption  # TODO cache some patterns of dropping, shuffling, etc.
+            caption = (
+                image_info.caption
+            )  # TODO cache some patterns of dropping, shuffling, etc.
 
             if self.caching_mode == "latents":
                 image = load_image(image_info.absolute_path)
@@ -1879,7 +2212,10 @@ class DreamBoothDataset(BaseDataset):
             tokens = base_name.split("_")
             if len(tokens) >= 5:
                 base_name_face_det = "_".join(tokens[:-4])
-            cap_paths = [base_name + caption_extension, base_name_face_det + caption_extension]
+            cap_paths = [
+                base_name + caption_extension,
+                base_name_face_det + caption_extension,
+            ]
 
             caption = None
             for cap_path in cap_paths:
@@ -1888,11 +2224,15 @@ class DreamBoothDataset(BaseDataset):
                         try:
                             lines = f.readlines()
                         except UnicodeDecodeError as e:
-                            logger.error(f"illegal char in file (not UTF-8): {cap_path}")
+                            logger.error(
+                                f"illegal char in file (not UTF-8): {cap_path}"
+                            )
                             raise e
                         assert len(lines) > 0, f"caption file is empty: {cap_path}"
                         if enable_wildcard:
-                            caption = "\n".join([line.strip() for line in lines if line.strip() != ""])  # 空行を除く、改行で連結
+                            caption = "\n".join(
+                                [line.strip() for line in lines if line.strip() != ""]
+                            )  # 空行を除く、改行で連結
                         else:
                             caption = lines[0].strip()
                     break
@@ -1919,7 +2259,9 @@ class DreamBoothDataset(BaseDataset):
                 with open(info_cache_file, "r", encoding="utf-8") as f:
                     metas = json.load(f)
                 img_paths = list(metas.keys())
-                sizes: List[Optional[Tuple[int, int]]] = [meta["resolution"] for meta in metas.values()]
+                sizes: List[Optional[Tuple[int, int]]] = [
+                    meta["resolution"] for meta in metas.values()
+                ]
 
                 # we may need to check image size and existence of image files, but it takes time, so user should check it before training
             else:
@@ -1932,7 +2274,9 @@ class DreamBoothDataset(BaseDataset):
                     logger.info("get image size from name of cache files")
 
                     # make image path to npz path mapping
-                    npz_paths = glob.glob(os.path.join(subset.image_dir, "*" + strategy.cache_suffix))
+                    npz_paths = glob.glob(
+                        os.path.join(subset.image_dir, "*" + strategy.cache_suffix)
+                    )
                     npz_paths.sort(
                         key=lambda item: item.rsplit("_", maxsplit=2)[0]
                     )  # sort by name excluding resolution and cache_suffix
@@ -1942,7 +2286,9 @@ class DreamBoothDataset(BaseDataset):
                     for i, img_path in enumerate(tqdm(img_paths)):
                         l = len(os.path.splitext(img_path)[0])  # remove extension
                         found = False
-                        while npz_path_index < len(npz_paths):  # until found or end of npz_paths
+                        while npz_path_index < len(
+                            npz_paths
+                        ):  # until found or end of npz_paths
                             # npz_paths are sorted, so if npz_path > img_path, img_path is not found
                             if npz_paths[npz_path_index][:l] > img_path[:l]:
                                 break
@@ -1952,14 +2298,18 @@ class DreamBoothDataset(BaseDataset):
                             npz_path_index += 1  # next npz_path
 
                         if found:
-                            w, h = strategy.get_image_size_from_disk_cache_path(img_path, npz_paths[npz_path_index])
+                            w, h = strategy.get_image_size_from_disk_cache_path(
+                                img_path, npz_paths[npz_path_index]
+                            )
                         else:
                             w, h = None, None
 
                         if w is not None and h is not None:
                             sizes[i] = (w, h)
                             size_set_count += 1
-                    logger.info(f"set image size from cache files: {size_set_count}/{len(img_paths)}")
+                    logger.info(
+                        f"set image size from cache files: {size_set_count}/{len(img_paths)}"
+                    )
 
             # We want to create a training and validation split. This should be improved in the future
             # to allow a clearer distinction between training and validation. This can be seen as a
@@ -1980,20 +2330,32 @@ class DreamBoothDataset(BaseDataset):
                     # required for training images dataset of regularization images
                 else:
                     img_paths, sizes = split_train_val(
-                        img_paths, sizes, self.is_training_dataset, self.validation_split, self.validation_seed
+                        img_paths,
+                        sizes,
+                        self.is_training_dataset,
+                        self.validation_split,
+                        self.validation_seed,
                     )
 
-            logger.info(f"found directory {subset.image_dir} contains {len(img_paths)} image files")
+            logger.info(
+                f"found directory {subset.image_dir} contains {len(img_paths)} image files"
+            )
 
             if use_cached_info_for_subset:
                 captions = [meta["caption"] for meta in metas.values()]
-                missing_captions = [img_path for img_path, caption in zip(img_paths, captions) if caption is None or caption == ""]
+                missing_captions = [
+                    img_path
+                    for img_path, caption in zip(img_paths, captions)
+                    if caption is None or caption == ""
+                ]
             else:
                 # 画像ファイルごとにプロンプトを読み込み、もしあればそちらを使う
                 captions = []
                 missing_captions = []
                 for img_path in tqdm(img_paths, desc="read caption"):
-                    cap_for_img = read_caption(img_path, subset.caption_extension, subset.enable_wildcard)
+                    cap_for_img = read_caption(
+                        img_path, subset.caption_extension, subset.enable_wildcard
+                    )
                     if cap_for_img is None and subset.class_tokens is None:
                         logger.warning(
                             f"neither caption file nor class tokens are found. use empty caption for {img_path}"
@@ -2007,25 +2369,35 @@ class DreamBoothDataset(BaseDataset):
                         else:
                             captions.append(cap_for_img)
 
-            self.set_tag_frequency(os.path.basename(subset.image_dir), captions)  # タグ頻度を記録
+            self.set_tag_frequency(
+                os.path.basename(subset.image_dir), captions
+            )  # タグ頻度を記録
 
             if missing_captions:
                 number_of_missing_captions = len(missing_captions)
                 number_of_missing_captions_to_show = 5
-                remaining_missing_captions = number_of_missing_captions - number_of_missing_captions_to_show
+                remaining_missing_captions = (
+                    number_of_missing_captions - number_of_missing_captions_to_show
+                )
 
                 logger.warning(
                     f"No caption file found for {number_of_missing_captions} images. Training will continue without captions for these images. If class token exists, it will be used."
                 )
                 for i, missing_caption in enumerate(missing_captions):
                     if i >= number_of_missing_captions_to_show:
-                        logger.warning(missing_caption + f"... and {remaining_missing_captions} more")
+                        logger.warning(
+                            missing_caption
+                            + f"... and {remaining_missing_captions} more"
+                        )
                         break
                     logger.warning(missing_caption)
 
             if not use_cached_info_for_subset and subset.cache_info:
                 logger.info(f"cache image info: {info_cache_file}")
-                sizes = [self.get_image_size(img_path) for img_path in tqdm(img_paths, desc="get image size")]
+                sizes = [
+                    self.get_image_size(img_path)
+                    for img_path in tqdm(img_paths, desc="get image size")
+                ]
                 matas = {}
                 for img_path, caption, size in zip(img_paths, captions, sizes):
                     matas[img_path] = {"caption": caption, "resolution": list(size)}
@@ -2049,12 +2421,16 @@ class DreamBoothDataset(BaseDataset):
                 continue
 
             if subset in self.subsets:
-                logger.warning(f"ignore duplicated subset with image_dir='{subset.image_dir}': use the first one")
+                logger.warning(
+                    f"ignore duplicated subset with image_dir='{subset.image_dir}': use the first one"
+                )
                 continue
 
             img_paths, captions, sizes = load_dreambooth_dir(subset)
             if len(img_paths) < 1:
-                logger.warning(f"ignore subset with image_dir='{subset.image_dir}': no images found")
+                logger.warning(
+                    f"ignore subset with image_dir='{subset.image_dir}': no images found"
+                )
                 continue
 
             if subset.is_reg:
@@ -2063,7 +2439,9 @@ class DreamBoothDataset(BaseDataset):
                 num_train_images += num_repeats * len(img_paths)
 
             for img_path, caption, size in zip(img_paths, captions, sizes):
-                info = ImageInfo(img_path, num_repeats, caption, subset.is_reg, img_path)
+                info = ImageInfo(
+                    img_path, num_repeats, caption, subset.is_reg, img_path
+                )
                 if size is not None:
                     info.image_size = size
                 if subset.is_reg:
@@ -2149,7 +2527,9 @@ class FineTuningDataset(BaseDataset):
                 raise ValueError(f"no metadata: {subset.metadata_file}")
 
             if len(metadata) < 1:
-                logger.warning(f"ignore subset with '{subset.metadata_file}': no image entries found")
+                logger.warning(
+                    f"ignore subset with '{subset.metadata_file}': no image entries found"
+                )
                 continue
 
             tags_list = []
@@ -2191,7 +2571,11 @@ class FineTuningDataset(BaseDataset):
                     # add tags to each line of caption
                     if caption is not None and tags is not None:
                         caption = "\n".join(
-                            [f"{line}{subset.caption_separator}{tags}" for line in caption.split("\n") if line.strip() != ""]
+                            [
+                                f"{line}{subset.caption_separator}{tags}"
+                                for line in caption.split("\n")
+                                if line.strip() != ""
+                            ]
                         )
                 else:
                     # use as is
@@ -2202,12 +2586,16 @@ class FineTuningDataset(BaseDataset):
                 if caption is None:
                     caption = ""
 
-                image_info = ImageInfo(image_key, subset.num_repeats, caption, False, abs_path)
+                image_info = ImageInfo(
+                    image_key, subset.num_repeats, caption, False, abs_path
+                )
                 image_info.image_size = img_md.get("train_resolution")
 
                 if not subset.color_aug and not subset.random_crop:
                     # if npz exists, use them
-                    image_info.latents_npz, image_info.latents_npz_flipped = self.image_key_to_npz_file(subset, image_key)
+                    image_info.latents_npz, image_info.latents_npz_flipped = (
+                        self.image_key_to_npz_file(subset, image_key)
+                    )
 
                 self.register_image(image_info, subset)
 
@@ -2219,7 +2607,9 @@ class FineTuningDataset(BaseDataset):
             self.subsets.append(subset)
 
         # check existence of all npz files
-        use_npz_latents = all([not (subset.color_aug or subset.random_crop) for subset in self.subsets])
+        use_npz_latents = all(
+            [not (subset.color_aug or subset.random_crop) for subset in self.subsets]
+        )
         if use_npz_latents:
             flip_aug_in_subset = False
             npz_any = False
@@ -2264,7 +2654,9 @@ class FineTuningDataset(BaseDataset):
         if sizes is None:
             if use_npz_latents:
                 use_npz_latents = False
-                logger.warning("npz files exist, but no bucket info in metadata. ignore npz files")
+                logger.warning(
+                    "npz files exist, but no bucket info in metadata. ignore npz files"
+                )
 
             assert (
                 resolution is not None
@@ -2272,8 +2664,10 @@ class FineTuningDataset(BaseDataset):
 
             self.enable_bucket = enable_bucket
             if self.enable_bucket:
-                min_bucket_reso, max_bucket_reso = self.adjust_min_max_bucket_reso_by_steps(
-                    resolution, min_bucket_reso, max_bucket_reso, bucket_reso_steps
+                min_bucket_reso, max_bucket_reso = (
+                    self.adjust_min_max_bucket_reso_by_steps(
+                        resolution, min_bucket_reso, max_bucket_reso, bucket_reso_steps
+                    )
                 )
                 self.min_bucket_reso = min_bucket_reso
                 self.max_bucket_reso = max_bucket_reso
@@ -2427,13 +2821,23 @@ class ControlNetDataset(BaseDataset):
             ctrl_img_path = os.path.abspath(ctrl_img_path)  # normalize path
 
             info.cond_img_path = ctrl_img_path
-            cond_imgs_with_pair.add(os.path.splitext(ctrl_img_path)[0])  # remove extension because Windows is case insensitive
+            cond_imgs_with_pair.add(
+                os.path.splitext(ctrl_img_path)[0]
+            )  # remove extension because Windows is case insensitive
 
         extra_imgs = []
         for subset in subsets:
             conditioning_img_paths = glob_images(subset.conditioning_data_dir, "*")
-            conditioning_img_paths = [os.path.abspath(p) for p in conditioning_img_paths]  # normalize path
-            extra_imgs.extend([p for p in conditioning_img_paths if os.path.splitext(p)[0] not in cond_imgs_with_pair])
+            conditioning_img_paths = [
+                os.path.abspath(p) for p in conditioning_img_paths
+            ]  # normalize path
+            extra_imgs.extend(
+                [
+                    p
+                    for p in conditioning_img_paths
+                    if os.path.splitext(p)[0] not in cond_imgs_with_pair
+                ]
+            )
 
         assert (
             len(missing_imgs) == 0
@@ -2452,14 +2856,20 @@ class ControlNetDataset(BaseDataset):
         self.bucket_manager = self.dreambooth_dataset_delegate.bucket_manager
         self.buckets_indices = self.dreambooth_dataset_delegate.buckets_indices
 
-    def cache_latents(self, vae, vae_batch_size=1, cache_to_disk=False, is_main_process=True):
-        return self.dreambooth_dataset_delegate.cache_latents(vae, vae_batch_size, cache_to_disk, is_main_process)
+    def cache_latents(
+        self, vae, vae_batch_size=1, cache_to_disk=False, is_main_process=True
+    ):
+        return self.dreambooth_dataset_delegate.cache_latents(
+            vae, vae_batch_size, cache_to_disk, is_main_process
+        )
 
     def new_cache_latents(self, model: Any, accelerator: Accelerator):
         return self.dreambooth_dataset_delegate.new_cache_latents(model, accelerator)
 
     def new_cache_text_encoder_outputs(self, models: List[Any], is_main_process: bool):
-        return self.dreambooth_dataset_delegate.new_cache_text_encoder_outputs(models, is_main_process)
+        return self.dreambooth_dataset_delegate.new_cache_text_encoder_outputs(
+            models, is_main_process
+        )
 
     def __len__(self):
         return self.dreambooth_dataset_delegate.__len__()
@@ -2470,12 +2880,19 @@ class ControlNetDataset(BaseDataset):
         bucket = self.dreambooth_dataset_delegate.bucket_manager.buckets[
             self.dreambooth_dataset_delegate.buckets_indices[index].bucket_index
         ]
-        bucket_batch_size = self.dreambooth_dataset_delegate.buckets_indices[index].bucket_batch_size
-        image_index = self.dreambooth_dataset_delegate.buckets_indices[index].batch_index * bucket_batch_size
+        bucket_batch_size = self.dreambooth_dataset_delegate.buckets_indices[
+            index
+        ].bucket_batch_size
+        image_index = (
+            self.dreambooth_dataset_delegate.buckets_indices[index].batch_index
+            * bucket_batch_size
+        )
 
         conditioning_images = []
 
-        for i, image_key in enumerate(bucket[image_index : image_index + bucket_batch_size]):
+        for i, image_key in enumerate(
+            bucket[image_index : image_index + bucket_batch_size]
+        ):
             image_info = self.dreambooth_dataset_delegate.image_data[image_key]
 
             target_size_hw = example["target_sizes_hw"][i]
@@ -2486,7 +2903,8 @@ class ControlNetDataset(BaseDataset):
 
             if self.dreambooth_dataset_delegate.enable_bucket:
                 assert (
-                    cond_img.shape[0] == original_size_hw[0] and cond_img.shape[1] == original_size_hw[1]
+                    cond_img.shape[0] == original_size_hw[0]
+                    and cond_img.shape[1] == original_size_hw[1]
                 ), f"size of conditioning image is not match : {image_info.absolute_path}"
                 cond_img = cv2.resize(
                     cond_img, image_info.resized_size, interpolation=cv2.INTER_AREA
@@ -2503,8 +2921,13 @@ class ControlNetDataset(BaseDataset):
                 #     cond_img.shape[0] == self.height and cond_img.shape[1] == self.width
                 # ), f"image size is small / 画像サイズが小さいようです: {image_info.absolute_path}"
                 # resize to target
-                if cond_img.shape[0] != target_size_hw[0] or cond_img.shape[1] != target_size_hw[1]:
-                    cond_img = pil_resize(cond_img, (int(target_size_hw[1]), int(target_size_hw[0])))
+                if (
+                    cond_img.shape[0] != target_size_hw[0]
+                    or cond_img.shape[1] != target_size_hw[1]
+                ):
+                    cond_img = pil_resize(
+                        cond_img, (int(target_size_hw[1]), int(target_size_hw[0]))
+                    )
 
             if flipped:
                 cond_img = cond_img[:, ::-1, :].copy()  # copy to avoid negative stride
@@ -2512,7 +2935,11 @@ class ControlNetDataset(BaseDataset):
             cond_img = self.conditioning_image_transforms(cond_img)
             conditioning_images.append(cond_img)
 
-        example["conditioning_images"] = torch.stack(conditioning_images).to(memory_format=torch.contiguous_format).float()
+        example["conditioning_images"] = (
+            torch.stack(conditioning_images)
+            .to(memory_format=torch.contiguous_format)
+            .float()
+        )
 
         return example
 
@@ -2544,7 +2971,9 @@ class DatasetGroup(torch.utils.data.ConcatDataset):
     #   for dataset in self.datasets:
     #     dataset.make_buckets()
 
-    def set_text_encoder_output_caching_strategy(self, strategy: TextEncoderOutputsCachingStrategy):
+    def set_text_encoder_output_caching_strategy(
+        self, strategy: TextEncoderOutputsCachingStrategy
+    ):
         """
         DataLoader is run in multiple processes, so we need to set the strategy manually.
         """
@@ -2555,10 +2984,19 @@ class DatasetGroup(torch.utils.data.ConcatDataset):
         for dataset in self.datasets:
             dataset.enable_XTI(*args, **kwargs)
 
-    def cache_latents(self, vae, vae_batch_size=1, cache_to_disk=False, is_main_process=True, file_suffix=".npz"):
+    def cache_latents(
+        self,
+        vae,
+        vae_batch_size=1,
+        cache_to_disk=False,
+        is_main_process=True,
+        file_suffix=".npz",
+    ):
         for i, dataset in enumerate(self.datasets):
             logger.info(f"[Dataset {i}]")
-            dataset.cache_latents(vae, vae_batch_size, cache_to_disk, is_main_process, file_suffix)
+            dataset.cache_latents(
+                vae, vae_batch_size, cache_to_disk, is_main_process, file_suffix
+            )
 
     def new_cache_latents(self, model: Any, accelerator: Accelerator):
         for i, dataset in enumerate(self.datasets):
@@ -2567,22 +3005,52 @@ class DatasetGroup(torch.utils.data.ConcatDataset):
         accelerator.wait_for_everyone()
 
     def cache_text_encoder_outputs(
-        self, tokenizers, text_encoders, device, weight_dtype, cache_to_disk=False, is_main_process=True
+        self,
+        tokenizers,
+        text_encoders,
+        device,
+        weight_dtype,
+        cache_to_disk=False,
+        is_main_process=True,
     ):
         for i, dataset in enumerate(self.datasets):
             logger.info(f"[Dataset {i}]")
-            dataset.cache_text_encoder_outputs(tokenizers, text_encoders, device, weight_dtype, cache_to_disk, is_main_process)
+            dataset.cache_text_encoder_outputs(
+                tokenizers,
+                text_encoders,
+                device,
+                weight_dtype,
+                cache_to_disk,
+                is_main_process,
+            )
 
     def cache_text_encoder_outputs_sd3(
-        self, tokenizer, text_encoders, device, output_dtype, te_dtypes, cache_to_disk=False, is_main_process=True, batch_size=None
+        self,
+        tokenizer,
+        text_encoders,
+        device,
+        output_dtype,
+        te_dtypes,
+        cache_to_disk=False,
+        is_main_process=True,
+        batch_size=None,
     ):
         for i, dataset in enumerate(self.datasets):
             logger.info(f"[Dataset {i}]")
             dataset.cache_text_encoder_outputs_sd3(
-                tokenizer, text_encoders, device, output_dtype, te_dtypes, cache_to_disk, is_main_process, batch_size
+                tokenizer,
+                text_encoders,
+                device,
+                output_dtype,
+                te_dtypes,
+                cache_to_disk,
+                is_main_process,
+                batch_size,
             )
 
-    def new_cache_text_encoder_outputs(self, models: List[Any], accelerator: Accelerator):
+    def new_cache_text_encoder_outputs(
+        self, models: List[Any], accelerator: Accelerator
+    ):
         for i, dataset in enumerate(self.datasets):
             logger.info(f"[Dataset {i}]")
             dataset.new_cache_text_encoder_outputs(models, accelerator)
@@ -2603,7 +3071,9 @@ class DatasetGroup(torch.utils.data.ConcatDataset):
         return all([dataset.is_latent_cacheable() for dataset in self.datasets])
 
     def is_text_encoder_output_cacheable(self) -> bool:
-        return all([dataset.is_text_encoder_output_cacheable() for dataset in self.datasets])
+        return all(
+            [dataset.is_text_encoder_output_cacheable() for dataset in self.datasets]
+        )
 
     def set_current_strategies(self):
         for dataset in self.datasets:
@@ -2626,7 +3096,9 @@ class DatasetGroup(torch.utils.data.ConcatDataset):
             dataset.disable_token_padding()
 
 
-def is_disk_cached_latents_is_expected(reso, npz_path: str, flip_aug: bool, alpha_mask: bool):
+def is_disk_cached_latents_is_expected(
+    reso, npz_path: str, flip_aug: bool, alpha_mask: bool
+):
     expected_latents_size = (reso[1] // 8, reso[0] // 8)  # bucket_resoはWxHなので注意
 
     if not os.path.exists(npz_path):
@@ -2634,7 +3106,9 @@ def is_disk_cached_latents_is_expected(reso, npz_path: str, flip_aug: bool, alph
 
     try:
         npz = np.load(npz_path)
-        if "latents" not in npz or "original_size" not in npz or "crop_ltrb" not in npz:  # old ver?
+        if (
+            "latents" not in npz or "original_size" not in npz or "crop_ltrb" not in npz
+        ):  # old ver?
             return False
         if npz["latents"].shape[1:3] != expected_latents_size:
             return False
@@ -2648,7 +3122,10 @@ def is_disk_cached_latents_is_expected(reso, npz_path: str, flip_aug: bool, alph
         if alpha_mask:
             if "alpha_mask" not in npz:
                 return False
-            if (npz["alpha_mask"].shape[1], npz["alpha_mask"].shape[0]) != reso:  # HxW => WxH != reso
+            if (
+                npz["alpha_mask"].shape[1],
+                npz["alpha_mask"].shape[0],
+            ) != reso:  # HxW => WxH != reso
                 return False
         else:
             if "alpha_mask" in npz:
@@ -2713,7 +3190,9 @@ def debug_dataset(train_dataset, show_input_ids=False):
 
             example = train_dataset[idx]
             if example["latents"] is not None:
-                logger.info(f"sample has latents from npz file: {example['latents'].size()}")
+                logger.info(
+                    f"sample has latents from npz file: {example['latents'].size()}"
+                )
             for j, (ik, cap, lw, orgsz, crptl, trgsz, flpdz) in enumerate(
                 zip(
                     example["image_keys"],
@@ -2730,7 +3209,9 @@ def debug_dataset(train_dataset, show_input_ids=False):
                     f'{ik}, size: {train_dataset.image_data[ik].image_size}, loss weight: {lw}, caption: "{cap}", original size: {orgsz}, crop top left: {crptl}, target size: {trgsz}, flipped: {flpdz}'
                 )
                 if "network_multipliers" in example:
-                    logger.info(f"network multiplier: {example['network_multipliers'][j]}")
+                    logger.info(
+                        f"network multiplier: {example['network_multipliers'][j]}"
+                    )
                 if "custom_attributes" in example:
                     logger.info(f"custom attributes: {example['custom_attributes'][j]}")
 
@@ -2784,9 +3265,13 @@ def glob_images(directory, base="*"):
     img_paths = []
     for ext in IMAGE_EXTENSIONS:
         if base == "*":
-            img_paths.extend(glob.glob(os.path.join(glob.escape(directory), base + ext)))
+            img_paths.extend(
+                glob.glob(os.path.join(glob.escape(directory), base + ext))
+            )
         else:
-            img_paths.extend(glob.glob(glob.escape(os.path.join(directory, base + ext))))
+            img_paths.extend(
+                glob.glob(glob.escape(os.path.join(directory, base + ext)))
+            )
     img_paths = list(set(img_paths))  # 重複を排除
     img_paths.sort()
     return img_paths
@@ -2877,7 +3362,9 @@ def load_arbitrary_dataset(args, tokenizer=None) -> MinimalDataset:
     dataset_class = args.dataset_class.split(".")[-1]
     module = importlib.import_module(module)
     dataset_class = getattr(module, dataset_class)
-    train_dataset_group: MinimalDataset = dataset_class(tokenizer, args.max_token_length, args.resolution, args.debug_dataset)
+    train_dataset_group: MinimalDataset = dataset_class(
+        tokenizer, args.max_token_length, args.resolution, args.debug_dataset
+    )
     return train_dataset_group
 
 
@@ -2907,7 +3394,9 @@ def trim_and_resize_if_required(
     if image_width != resized_size[0] or image_height != resized_size[1]:
         # リサイズする
         if image_width > resized_size[0] and image_height > resized_size[1]:
-            image = cv2.resize(image, resized_size, interpolation=cv2.INTER_AREA)  # INTER_AREAでやりたいのでcv2でリサイズ
+            image = cv2.resize(
+                image, resized_size, interpolation=cv2.INTER_AREA
+            )  # INTER_AREAでやりたいのでcv2でリサイズ
         else:
             image = pil_resize(image, resized_size)
 
@@ -2929,14 +3418,21 @@ def trim_and_resize_if_required(
 
     crop_ltrb = BucketManager.get_crop_ltrb(reso, original_size)
 
-    assert image.shape[0] == reso[1] and image.shape[1] == reso[0], f"internal error, illegal trimmed size: {image.shape}, {reso}"
+    assert (
+        image.shape[0] == reso[1] and image.shape[1] == reso[0]
+    ), f"internal error, illegal trimmed size: {image.shape}, {reso}"
     return image, original_size, crop_ltrb
 
 
 # for new_cache_latents
 def load_images_and_masks_for_caching(
     image_infos: List[ImageInfo], use_alpha_mask: bool, random_crop: bool
-) -> Tuple[torch.Tensor, List[np.ndarray], List[Tuple[int, int]], List[Tuple[int, int, int, int]]]:
+) -> Tuple[
+    torch.Tensor,
+    List[np.ndarray],
+    List[Tuple[int, int]],
+    List[Tuple[int, int, int, int]],
+]:
     r"""
     requires image_infos to have: [absolute_path or image], bucket_reso, resized_size
 
@@ -2952,9 +3448,15 @@ def load_images_and_masks_for_caching(
     original_sizes: List[Tuple[int, int]] = []
     crop_ltrbs: List[Tuple[int, int, int, int]] = []
     for info in image_infos:
-        image = load_image(info.absolute_path, use_alpha_mask) if info.image is None else np.array(info.image, np.uint8)
+        image = (
+            load_image(info.absolute_path, use_alpha_mask)
+            if info.image is None
+            else np.array(info.image, np.uint8)
+        )
         # TODO 画像のメタデータが壊れていて、メタデータから割り当てたbucketと実際の画像サイズが一致しない場合があるのでチェック追加要
-        image, original_size, crop_ltrb = trim_and_resize_if_required(random_crop, image, info.bucket_reso, info.resized_size)
+        image, original_size, crop_ltrb = trim_and_resize_if_required(
+            random_crop, image, info.bucket_reso, info.resized_size
+        )
 
         original_sizes.append(original_size)
         crop_ltrbs.append(crop_ltrb)
@@ -2965,7 +3467,9 @@ def load_images_and_masks_for_caching(
                 alpha_mask = alpha_mask.astype(np.float32) / 255.0
                 alpha_mask = torch.FloatTensor(alpha_mask)  # [H,W]
             else:
-                alpha_mask = torch.ones_like(image[:, :, 0], dtype=torch.float32)  # [H,W]
+                alpha_mask = torch.ones_like(
+                    image[:, :, 0], dtype=torch.float32
+                )  # [H,W]
         else:
             alpha_mask = None
         alpha_masks.append(alpha_mask)
@@ -2979,7 +3483,12 @@ def load_images_and_masks_for_caching(
 
 
 def cache_batch_latents(
-    vae: AutoencoderKL, cache_to_disk: bool, image_infos: List[ImageInfo], flip_aug: bool, use_alpha_mask: bool, random_crop: bool
+    vae: AutoencoderKL,
+    cache_to_disk: bool,
+    image_infos: List[ImageInfo],
+    flip_aug: bool,
+    use_alpha_mask: bool,
+    random_crop: bool,
 ) -> None:
     r"""
     requires image_infos to have: absolute_path, bucket_reso, resized_size, latents_npz
@@ -2993,9 +3502,15 @@ def cache_batch_latents(
     images = []
     alpha_masks: List[np.ndarray] = []
     for info in image_infos:
-        image = load_image(info.absolute_path, use_alpha_mask) if info.image is None else np.array(info.image, np.uint8)
+        image = (
+            load_image(info.absolute_path, use_alpha_mask)
+            if info.image is None
+            else np.array(info.image, np.uint8)
+        )
         # TODO 画像のメタデータが壊れていて、メタデータから割り当てたbucketと実際の画像サイズが一致しない場合があるのでチェック追加要
-        image, original_size, crop_ltrb = trim_and_resize_if_required(random_crop, image, info.bucket_reso, info.resized_size)
+        image, original_size, crop_ltrb = trim_and_resize_if_required(
+            random_crop, image, info.bucket_reso, info.resized_size
+        )
 
         info.latents_original_size = original_size
         info.latents_crop_ltrb = crop_ltrb
@@ -3006,7 +3521,9 @@ def cache_batch_latents(
                 alpha_mask = alpha_mask.astype(np.float32) / 255.0
                 alpha_mask = torch.FloatTensor(alpha_mask)  # [H,W]
             else:
-                alpha_mask = torch.ones_like(image[:, :, 0], dtype=torch.float32)  # [H,W]
+                alpha_mask = torch.ones_like(
+                    image[:, :, 0], dtype=torch.float32
+                )  # [H,W]
         else:
             alpha_mask = None
         alpha_masks.append(alpha_mask)
@@ -3028,9 +3545,13 @@ def cache_batch_latents(
     else:
         flipped_latents = [None] * len(latents)
 
-    for info, latent, flipped_latent, alpha_mask in zip(image_infos, latents, flipped_latents, alpha_masks):
+    for info, latent, flipped_latent, alpha_mask in zip(
+        image_infos, latents, flipped_latents, alpha_masks
+    ):
         # check NaN
-        if torch.isnan(latents).any() or (flipped_latent is not None and torch.isnan(flipped_latent).any()):
+        if torch.isnan(latents).any() or (
+            flipped_latent is not None and torch.isnan(flipped_latent).any()
+        ):
             raise RuntimeError(f"NaN detected in latents: {info.absolute_path}")
 
         if cache_to_disk:
@@ -3054,7 +3575,14 @@ def cache_batch_latents(
 
 
 def cache_batch_text_encoder_outputs(
-    image_infos, tokenizers, text_encoders, max_token_length, cache_to_disk, input_ids1, input_ids2, dtype
+    image_infos,
+    tokenizers,
+    text_encoders,
+    max_token_length,
+    cache_to_disk,
+    input_ids1,
+    input_ids2,
+    dtype,
 ):
     input_ids1 = input_ids1.to(text_encoders[0].device)
     input_ids2 = input_ids2.to(text_encoders[1].device)
@@ -3076,9 +3604,13 @@ def cache_batch_text_encoder_outputs(
         b_hidden_state2 = b_hidden_state2.detach().to("cpu")  # b,n*75+2,1280
         b_pool2 = b_pool2.detach().to("cpu")  # b,1280
 
-    for info, hidden_state1, hidden_state2, pool2 in zip(image_infos, b_hidden_state1, b_hidden_state2, b_pool2):
+    for info, hidden_state1, hidden_state2, pool2 in zip(
+        image_infos, b_hidden_state1, b_hidden_state2, b_pool2
+    ):
         if cache_to_disk:
-            save_text_encoder_outputs_to_disk(info.text_encoder_outputs_npz, hidden_state1, hidden_state2, pool2)
+            save_text_encoder_outputs_to_disk(
+                info.text_encoder_outputs_npz, hidden_state1, hidden_state2, pool2
+            )
         else:
             info.text_encoder_outputs1 = hidden_state1
             info.text_encoder_outputs2 = hidden_state2
@@ -3086,7 +3618,13 @@ def cache_batch_text_encoder_outputs(
 
 
 def cache_batch_text_encoder_outputs_sd3(
-    image_infos, tokenizer, text_encoders, max_token_length, cache_to_disk, input_ids, output_dtype
+    image_infos,
+    tokenizer,
+    text_encoders,
+    max_token_length,
+    cache_to_disk,
+    input_ids,
+    output_dtype,
 ):
     # make input_ids for each text encoder
     l_tokens, g_tokens, t5_tokens = input_ids
@@ -3102,11 +3640,19 @@ def cache_batch_text_encoder_outputs_sd3(
 
     for info, lg_out, t5_out, pool in zip(image_infos, b_lg_out, b_t5_out, b_pool):
         # debug: NaN check
-        if torch.isnan(lg_out).any() or torch.isnan(t5_out).any() or torch.isnan(pool).any():
-            raise RuntimeError(f"NaN detected in text encoder outputs: {info.absolute_path}")
+        if (
+            torch.isnan(lg_out).any()
+            or torch.isnan(t5_out).any()
+            or torch.isnan(pool).any()
+        ):
+            raise RuntimeError(
+                f"NaN detected in text encoder outputs: {info.absolute_path}"
+            )
 
         if cache_to_disk:
-            save_text_encoder_outputs_to_disk(info.text_encoder_outputs_npz, lg_out, t5_out, pool)
+            save_text_encoder_outputs_to_disk(
+                info.text_encoder_outputs_npz, lg_out, t5_out, pool
+            )
         else:
             info.text_encoder_outputs1 = lg_out
             info.text_encoder_outputs2 = t5_out
@@ -3125,7 +3671,9 @@ def save_text_encoder_outputs_to_disk(npz_path, hidden_state1, hidden_state2, po
 def load_text_encoder_outputs_from_disk(npz_path):
     with np.load(npz_path) as f:
         hidden_state1 = torch.from_numpy(f["hidden_state1"])
-        hidden_state2 = torch.from_numpy(f["hidden_state2"]) if "hidden_state2" in f else None
+        hidden_state2 = (
+            torch.from_numpy(f["hidden_state2"]) if "hidden_state2" in f else None
+        )
         pool2 = torch.from_numpy(f["pool2"]) if "pool2" in f else None
     return hidden_state1, hidden_state2, pool2
 
@@ -3237,9 +3785,17 @@ def addnet_hash_safetensors(b):
 
 def get_git_revision_hash() -> str:
     try:
-        return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=os.path.dirname(__file__)).decode("ascii").strip()
+        return (
+            subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=os.path.dirname(__file__)
+            )
+            .decode("ascii")
+            .strip()
+        )
     except:
         return "(unknown)"
+
+
 #     diffusers.models.attention.CrossAttention.forward = forward_xformers
 def replace_unet_modules(unet: UNet2DConditionModel, mem_eff_attn, xformers, sdpa):
     if mem_eff_attn:
@@ -3374,7 +3930,9 @@ def add_sd_models_arguments(parser: argparse.ArgumentParser):
         "--v2", action="store_true", help="load Stable Diffusion v2.0 model"
     )
     parser.add_argument(
-        "--v_parameterization", action="store_true", help="enable v-parameterization training"
+        "--v_parameterization",
+        action="store_true",
+        help="enable v-parameterization training",
     )
     parser.add_argument(
         "--pretrained_model_name_or_path",
@@ -3396,7 +3954,9 @@ def add_optimizer_arguments(parser: argparse.ArgumentParser):
             try:
                 return float(value[:-1]) / 100.0
             except ValueError:
-                raise argparse.ArgumentTypeError(f"Value '{value}' is not a valid percentage")
+                raise argparse.ArgumentTypeError(
+                    f"Value '{value}' is not a valid percentage"
+                )
         try:
             float_value = float(value)
             if float_value >= 1:
@@ -3428,7 +3988,9 @@ def add_optimizer_arguments(parser: argparse.ArgumentParser):
         help="use Lion optimizer (requires lion-pytorch)",
     )
 
-    parser.add_argument("--learning_rate", type=float, default=2.0e-6, help="learning rate")
+    parser.add_argument(
+        "--learning_rate", type=float, default=2.0e-6, help="learning rate"
+    )
     parser.add_argument(
         "--max_grad_norm",
         default=1.0,
@@ -3458,7 +4020,9 @@ def add_optimizer_arguments(parser: argparse.ArgumentParser):
     #     help='additional arguments for schedulefree_wrapper (like "momentum=0.9 weight_decay_at_y=0.1 ...")',
     # )
 
-    parser.add_argument("--lr_scheduler_type", type=str, default="", help="custom scheduler module")
+    parser.add_argument(
+        "--lr_scheduler_type", type=str, default="", help="custom scheduler module"
+    )
     parser.add_argument(
         "--lr_scheduler_args",
         type=str,
@@ -3506,7 +4070,7 @@ def add_optimizer_arguments(parser: argparse.ArgumentParser):
         "--lr_scheduler_timescale",
         type=int,
         default=None,
-        help="Inverse sqrt timescale for inverse sqrt scheduler,defaults to `num_warmup_steps`"
+        help="Inverse sqrt timescale for inverse sqrt scheduler,defaults to `num_warmup_steps`",
     )
     parser.add_argument(
         "--lr_scheduler_min_lr_ratio",
@@ -3541,7 +4105,9 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
         default=None,
         help="huggingface model path to upload files",
     )
-    parser.add_argument("--huggingface_token", type=str, default=None, help="huggingface token")
+    parser.add_argument(
+        "--huggingface_token", type=str, default=None, help="huggingface token"
+    )
     parser.add_argument(
         "--huggingface_repo_visibility",
         type=str,
@@ -3549,7 +4115,9 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
         help="huggingface repository visibility ('public' for public, 'private' or None for private)",
     )
     parser.add_argument(
-        "--save_state_to_huggingface", action="store_true", help="save state to huggingface"
+        "--save_state_to_huggingface",
+        action="store_true",
+        help="save state to huggingface",
     )
     parser.add_argument(
         "--resume_from_huggingface",
@@ -3620,9 +4188,13 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
         action="store_true",
         help="save training state (including optimizer states etc.) on train end",
     )
-    parser.add_argument("--resume", type=str, default=None, help="saved state to resume training")
+    parser.add_argument(
+        "--resume", type=str, default=None, help="saved state to resume training"
+    )
 
-    parser.add_argument("--train_batch_size", type=int, default=1, help="batch size for training")
+    parser.add_argument(
+        "--train_batch_size", type=int, default=1, help="batch size for training"
+    )
     parser.add_argument(
         "--max_token_length",
         type=int,
@@ -3636,7 +4208,9 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
         help="use memory efficient attention for CrossAttention",
     )
     parser.add_argument(
-        "--torch_compile", action="store_true", help="use torch.compile (requires PyTorch 2.0)"
+        "--torch_compile",
+        action="store_true",
+        help="use torch.compile (requires PyTorch 2.0)",
     )
     parser.add_argument(
         "--dynamo_backend",
@@ -3661,7 +4235,9 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
         ],
         help="dynamo backend type (default is inductor)",
     )
-    parser.add_argument("--xformers", action="store_true", help="use xformers for CrossAttention")
+    parser.add_argument(
+        "--xformers", action="store_true", help="use xformers for CrossAttention"
+    )
     parser.add_argument(
         "--sdpa",
         action="store_true",
@@ -3674,7 +4250,9 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
         help="path to checkpoint of vae to replace",
     )
 
-    parser.add_argument("--max_train_steps", type=int, default=1600, help="training steps")
+    parser.add_argument(
+        "--max_train_steps", type=int, default=1600, help="training steps"
+    )
     parser.add_argument(
         "--max_train_epochs",
         type=int,
@@ -3692,9 +4270,13 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
         action="store_true",
         help="persistent DataLoader workers (useful for reduce time gap between epoch, but may use more memory)",
     )
-    parser.add_argument("--seed", type=int, default=None, help="random seed for training")
     parser.add_argument(
-        "--gradient_checkpointing", action="store_true", help="enable gradient checkpointing"
+        "--seed", type=int, default=None, help="random seed for training"
+    )
+    parser.add_argument(
+        "--gradient_checkpointing",
+        action="store_true",
+        help="enable gradient checkpointing",
     )
     parser.add_argument(
         "--gradient_accumulation_steps",
@@ -3709,9 +4291,15 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
         choices=["no", "fp16", "bf16"],
         help="use mixed precision",
     )
-    parser.add_argument("--full_fp16", action="store_true", help="fp16 training including gradients")
-    parser.add_argument("--full_bf16", action="store_true", help="bf16 training including gradients")  # TODO move to SDXL training, because it is not supported by SD1/2
-    parser.add_argument("--fp8_base", action="store_true", help="use fp8 for base model")
+    parser.add_argument(
+        "--full_fp16", action="store_true", help="fp16 training including gradients"
+    )
+    parser.add_argument(
+        "--full_bf16", action="store_true", help="bf16 training including gradients"
+    )  # TODO move to SDXL training, because it is not supported by SD1/2
+    parser.add_argument(
+        "--fp8_base", action="store_true", help="use fp8 for base model"
+    )
 
     parser.add_argument(
         "--ddp_timeout",
@@ -3775,7 +4363,9 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
         default=None,
         help="specify WandB API key to log in before starting training (optional)",
     )
-    parser.add_argument("--log_config", action="store_true", help="log training configuration")
+    parser.add_argument(
+        "--log_config", action="store_true", help="log training configuration"
+    )
 
     parser.add_argument(
         "--noise_offset",
@@ -3888,7 +4478,9 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
         help="generate sample images every N steps",
     )
     parser.add_argument(
-        "--sample_at_first", action="store_true", help="generate sample images before training"
+        "--sample_at_first",
+        action="store_true",
+        help="generate sample images before training",
     )
     parser.add_argument(
         "--sample_every_n_epochs",
@@ -3934,7 +4526,9 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
         help="using .toml instead of args to pass hyperparameter",
     )
     parser.add_argument(
-        "--output_config", action="store_true", help="output command line args to given .toml file"
+        "--output_config",
+        action="store_true",
+        help="output command line args to given .toml file",
     )
 
     # SAI Model spec
@@ -3972,7 +4566,10 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
     if support_dreambooth:
         # DreamBooth training
         parser.add_argument(
-            "--prior_loss_weight", type=float, default=1.0, help="loss weight for regularization images"
+            "--prior_loss_weight",
+            type=float,
+            default=1.0,
+            help="loss weight for regularization images",
         )
 
 
@@ -3993,7 +4590,9 @@ def add_masked_loss_arguments(parser: argparse.ArgumentParser):
 def add_dit_training_arguments(parser: argparse.ArgumentParser):
     # Text encoder related arguments
     parser.add_argument(
-        "--cache_text_encoder_outputs", action="store_true", help="cache text encoder outputs"
+        "--cache_text_encoder_outputs",
+        action="store_true",
+        help="cache text encoder outputs",
     )
     parser.add_argument(
         "--cache_text_encoder_outputs_to_disk",
@@ -4049,7 +4648,7 @@ def add_dit_training_arguments(parser: argparse.ArgumentParser):
         default=None,
         help="[EXPERIMENTAL] "
         "Sets the number of blocks to swap during the forward and backward passes."
-        "Increasing this number lowers the overall VRAM used during training at the expense of training speed (s/it)."
+        "Increasing this number lowers the overall VRAM used during training at the expense of training speed (s/it).",
     )
 
 
@@ -4077,7 +4676,13 @@ def get_sanitized_config_or_none(args: argparse.Namespace):
         # filter out sensitive values and convert to string if necessary
         if k not in sensitive_args + sensitive_path_args:
             # Accelerate values need to have type `bool`,`str`, `float`, `int`, or `None`.
-            if v is None or isinstance(v, bool) or isinstance(v, str) or isinstance(v, float) or isinstance(v, int):
+            if (
+                v is None
+                or isinstance(v, bool)
+                or isinstance(v, str)
+                or isinstance(v, float)
+                or isinstance(v, int)
+            ):
                 filtered_args[k] = v
             # accelerate does not support lists
             elif isinstance(v, list):
@@ -4095,7 +4700,9 @@ def verify_command_line_training_args(args: argparse.Namespace):
     # check whether sensitive options are included in the command line arguments
     # if so, warn or inform the user to move them to the configuration file
 
-    wandb_enabled = args.log_with is not None and args.log_with != "tensorboard"  # "all" or "wandb"
+    wandb_enabled = (
+        args.log_with is not None and args.log_with != "tensorboard"
+    )  # "all" or "wandb"
     if not wandb_enabled:
         return
 
@@ -4130,7 +4737,10 @@ def verify_command_line_training_args(args: argparse.Namespace):
         )
 
     # other sensitive options
-    if args.huggingface_repo_id is not None and args.huggingface_repo_visibility != "public":
+    if (
+        args.huggingface_repo_id is not None
+        and args.huggingface_repo_visibility != "public"
+    ):
         logger.info(
             f"wandb is enabled, but option huggingface_repo_id is included in the command line and huggingface_repo_visibility is not 'public'. Because the command line is exposed to the public, it is recommended to move it to the `.toml` file."
         )
@@ -4154,13 +4764,17 @@ def verify_training_args(args: argparse.Namespace):
 
     if args.cache_latents_to_disk and not args.cache_latents:
         args.cache_latents = True
-        logger.warning("cache_latents_to_disk is enabled, so cache_latents is also enabled")
+        logger.warning(
+            "cache_latents_to_disk is enabled, so cache_latents is also enabled"
+        )
 
     if args.adaptive_noise_scale is not None and args.noise_offset is None:
         raise ValueError("adaptive_noise_scale requires noise_offset")
 
     if args.scale_v_pred_loss_like_noise_pred and not args.v_parameterization:
-        raise ValueError("scale_v_pred_loss_like_noise_pred can be enabled only with v_parameterization")
+        raise ValueError(
+            "scale_v_pred_loss_like_noise_pred can be enabled only with v_parameterization"
+        )
 
     if args.v_pred_like_loss and args.v_parameterization:
         raise ValueError("v_pred_like_loss cannot be enabled with v_parameterization")
@@ -4184,7 +4798,10 @@ def verify_training_args(args: argparse.Namespace):
 
 
 def add_dataset_arguments(
-    parser: argparse.ArgumentParser, support_dreambooth: bool, support_caption: bool, support_caption_dropout: bool
+    parser: argparse.ArgumentParser,
+    support_dreambooth: bool,
+    support_caption: bool,
+    support_caption_dropout: bool,
 ):
     # dataset common
     parser.add_argument(
@@ -4193,14 +4810,19 @@ def add_dataset_arguments(
     parser.add_argument(
         "--cache_info",
         action="store_true",
-        help="cache meta information (caption and image size) for faster dataset loading. only available for DreamBooth"
+        help="cache meta information (caption and image size) for faster dataset loading. only available for DreamBooth",
     )
     parser.add_argument(
         "--shuffle_caption", action="store_true", help="shuffle separated caption"
     )
-    parser.add_argument("--caption_separator", type=str, default=",", help="separator for caption")
     parser.add_argument(
-        "--caption_extension", type=str, default=".caption", help="extension of caption files"
+        "--caption_separator", type=str, default=",", help="separator for caption"
+    )
+    parser.add_argument(
+        "--caption_extension",
+        type=str,
+        default=".caption",
+        help="extension of caption files",
     )
     parser.add_argument(
         "--caption_extention",
@@ -4347,7 +4969,10 @@ def add_dataset_arguments(
         # Textual Inversion はcaptionのdropoutをsupportしない
         # いわゆるtensorのDropoutと紛らわしいのでprefixにcaptionを付けておく　every_n_epochsは他と平仄を合わせてdefault Noneに
         parser.add_argument(
-            "--caption_dropout_rate", type=float, default=0.0, help="Rate out dropout caption(0.0~1.0)"
+            "--caption_dropout_rate",
+            type=float,
+            default=0.0,
+            help="Rate out dropout caption(0.0~1.0)",
         )
         parser.add_argument(
             "--caption_dropout_every_n_epochs",
@@ -4365,7 +4990,10 @@ def add_dataset_arguments(
     if support_dreambooth:
         # DreamBooth dataset
         parser.add_argument(
-            "--reg_data_dir", type=str, default=None, help="directory for regularization images"
+            "--reg_data_dir",
+            type=str,
+            default=None,
+            help="directory for regularization images",
         )
 
     if support_caption:
@@ -4400,7 +5028,11 @@ def read_config_from_file(args: argparse.Namespace, parser: argparse.ArgumentPar
     if not args.config_file:
         return args
 
-    config_path = args.config_file + ".toml" if not args.config_file.endswith(".toml") else args.config_file
+    config_path = (
+        args.config_file + ".toml"
+        if not args.config_file.endswith(".toml")
+        else args.config_file
+    )
 
     if args.output_config:
         # check if config file exists
@@ -4489,7 +5121,9 @@ def resume_from_local_or_hf_if_specified(accelerator, args):
             repo_type = "model"
         else:
             path_in_repo, revision, repo_type = divided
-    logger.info(f"Downloading state from huggingface: {repo_id}/{path_in_repo}@{revision}")
+    logger.info(
+        f"Downloading state from huggingface: {repo_id}/{path_in_repo}@{revision}"
+    )
 
     list_files = huggingface_util.list_dir(
         repo_id=repo_id,
@@ -4512,11 +5146,13 @@ def resume_from_local_or_hf_if_specified(accelerator, args):
         return await asyncio.get_event_loop().run_in_executor(None, task)
 
     loop = asyncio.get_event_loop()
-    results = loop.run_until_complete(asyncio.gather(*[download(filename=filename.rfilename) for filename in list_files]))
-    if len(results) == 0:
-        raise ValueError(
-            "No files found in the specified repo id/path/revision"
+    results = loop.run_until_complete(
+        asyncio.gather(
+            *[download(filename=filename.rfilename) for filename in list_files]
         )
+    )
+    if len(results) == 0:
+        raise ValueError("No files found in the specified repo id/path/revision")
     dirname = os.path.dirname(results[0])
     accelerator.load_state(dirname)
 
@@ -4606,7 +5242,9 @@ def get_optimizer(args, trainable_params) -> tuple[str, str, object]:
                 optimizer_kwargs["momentum"] = 0.9
 
             optimizer_class = bnb.optim.SGD8bit
-            optimizer = optimizer_class(trainable_params, lr=lr, nesterov=True, **optimizer_kwargs)
+            optimizer = optimizer_class(
+                trainable_params, lr=lr, nesterov=True, **optimizer_kwargs
+            )
 
         elif optimizer_type == "Lion8bit".lower():
             logger.info(f"use 8-bit Lion optimizer | {optimizer_kwargs}")
@@ -4667,15 +5305,18 @@ def get_optimizer(args, trainable_params) -> tuple[str, str, object]:
     elif optimizer_type == "SGDNesterov".lower():
         logger.info(f"use SGD with Nesterov optimizer | {optimizer_kwargs}")
         if "momentum" not in optimizer_kwargs:
-            logger.info(
-                "SGD with Nesterov must be with momentum, set momentum to 0.9"
-            )
+            logger.info("SGD with Nesterov must be with momentum, set momentum to 0.9")
             optimizer_kwargs["momentum"] = 0.9
 
         optimizer_class = torch.optim.SGD
-        optimizer = optimizer_class(trainable_params, lr=lr, nesterov=True, **optimizer_kwargs)
+        optimizer = optimizer_class(
+            trainable_params, lr=lr, nesterov=True, **optimizer_kwargs
+        )
 
-    elif optimizer_type.startswith("DAdapt".lower()) or optimizer_type == "Prodigy".lower():
+    elif (
+        optimizer_type.startswith("DAdapt".lower())
+        or optimizer_type == "Prodigy".lower()
+    ):
         # check lr and lr_count, and logger.info warning
         actual_lr = lr
         lr_count = 1
@@ -4706,9 +5347,14 @@ def get_optimizer(args, trainable_params) -> tuple[str, str, object]:
                 raise ImportError("No dadaptation")
 
             # set optimizer
-            if optimizer_type == "DAdaptation".lower() or optimizer_type == "DAdaptAdamPreprint".lower():
+            if (
+                optimizer_type == "DAdaptation".lower()
+                or optimizer_type == "DAdaptAdamPreprint".lower()
+            ):
                 optimizer_class = experimental.DAdaptAdamPreprint
-                logger.info(f"use D-Adaptation AdamPreprint optimizer | {optimizer_kwargs}")
+                logger.info(
+                    f"use D-Adaptation AdamPreprint optimizer | {optimizer_kwargs}"
+                )
             elif optimizer_type == "DAdaptAdaGrad".lower():
                 optimizer_class = dadaptation.DAdaptAdaGrad
                 logger.info(f"use D-Adaptation AdaGrad optimizer | {optimizer_kwargs}")
@@ -4747,10 +5393,10 @@ def get_optimizer(args, trainable_params) -> tuple[str, str, object]:
         # 引数を確認して適宜補正する
         if "relative_step" not in optimizer_kwargs:
             optimizer_kwargs["relative_step"] = True  # default
-        if not optimizer_kwargs["relative_step"] and optimizer_kwargs.get("warmup_init", False):
-            logger.info(
-                "set relative_step to True because warmup_init is True"
-            )
+        if not optimizer_kwargs["relative_step"] and optimizer_kwargs.get(
+            "warmup_init", False
+        ):
+            logger.info("set relative_step to True because warmup_init is True")
             optimizer_kwargs["relative_step"] = True
         logger.info(f"use Adafactor optimizer | {optimizer_kwargs}")
 
@@ -4800,7 +5446,9 @@ def get_optimizer(args, trainable_params) -> tuple[str, str, object]:
         try:
             import schedulefree as sf
         except ImportError:
-            raise ImportError("No schedulefree / schedulefreeがインストールされていないようです")
+            raise ImportError(
+                "No schedulefree / schedulefreeがインストールされていないようです"
+            )
 
         if optimizer_type == "RAdamScheduleFree".lower():
             optimizer_class = sf.RAdamScheduleFree
@@ -4819,11 +5467,11 @@ def get_optimizer(args, trainable_params) -> tuple[str, str, object]:
 
     elif optimizer_type == "Fcompass".lower():
         logger.info(f"use Fcompass optimizer | {optimizer_kwargs}")
-        try:    
+        try:
             from library.optimizers.fcompass import FCompass
 
             optimizer_class = FCompass
-        except   ImportError:
+        except ImportError:
             raise ImportError("Importing FCompass failed")
         optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
@@ -4933,7 +5581,9 @@ def get_optimizer(args, trainable_params) -> tuple[str, str, object]:
     return optimizer_name, optimizer_args, optimizer
 
 
-def get_optimizer_train_eval_fn(optimizer: Optimizer, args: argparse.Namespace) -> Tuple[Callable, Callable]:
+def get_optimizer_train_eval_fn(
+    optimizer: Optimizer, args: argparse.Namespace
+) -> Tuple[Callable, Callable]:
     if not is_schedulefree_optimizer(optimizer, args):
         # return dummy func
         return lambda: None, lambda: None
@@ -4946,7 +5596,9 @@ def get_optimizer_train_eval_fn(optimizer: Optimizer, args: argparse.Namespace) 
 
 
 def is_schedulefree_optimizer(optimizer: Optimizer, args: argparse.Namespace) -> bool:
-    return args.optimizer_type.lower().endswith("schedulefree".lower())  # or args.optimizer_schedulefree_wrapper
+    return args.optimizer_type.lower().endswith(
+        "schedulefree".lower()
+    )  # or args.optimizer_schedulefree_wrapper
 
 
 def get_dummy_scheduler(optimizer: Optimizer) -> Any:
@@ -4977,12 +5629,18 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
         return get_dummy_scheduler(optimizer)
 
     name = args.lr_scheduler
-    num_training_steps = args.max_train_steps * num_processes  # * args.gradient_accumulation_steps
+    num_training_steps = (
+        args.max_train_steps * num_processes
+    )  # * args.gradient_accumulation_steps
     num_warmup_steps: Optional[int] = (
-        int(args.lr_warmup_steps * num_training_steps) if isinstance(args.lr_warmup_steps, float) else args.lr_warmup_steps
+        int(args.lr_warmup_steps * num_training_steps)
+        if isinstance(args.lr_warmup_steps, float)
+        else args.lr_warmup_steps
     )
     num_decay_steps: Optional[int] = (
-        int(args.lr_decay_steps * num_training_steps) if isinstance(args.lr_decay_steps, float) else args.lr_decay_steps
+        int(args.lr_decay_steps * num_training_steps)
+        if isinstance(args.lr_decay_steps, float)
+        else args.lr_decay_steps
     )
     num_stable_steps = num_training_steps - num_warmup_steps - num_decay_steps
     num_cycles = args.lr_scheduler_num_cycles
@@ -4999,7 +5657,9 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
 
     def wrap_check_needless_num_warmup_steps(return_vals):
         if num_warmup_steps is not None and num_warmup_steps != 0:
-            raise ValueError(f"{name} does not require `num_warmup_steps`. Set None or 0.")
+            raise ValueError(
+                f"{name} does not require `num_warmup_steps`. Set None or 0."
+            )
         return return_vals
 
     # using any lr_scheduler from other library
@@ -5022,32 +5682,49 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
         ), "adafactor scheduler must be used with Adafactor optimizer"
         initial_lr = float(name.split(":")[1])
         # logger.info(f"adafactor scheduler init lr {initial_lr}")
-        return wrap_check_needless_num_warmup_steps(transformers.optimization.AdafactorSchedule(optimizer, initial_lr))
+        return wrap_check_needless_num_warmup_steps(
+            transformers.optimization.AdafactorSchedule(optimizer, initial_lr)
+        )
 
     if name == DiffusersSchedulerType.PIECEWISE_CONSTANT.value:
         name = DiffusersSchedulerType(name)
         schedule_func = DIFFUSERS_TYPE_TO_SCHEDULER_FUNCTION[name]
-        return schedule_func(optimizer, **lr_scheduler_kwargs)  # step_rules and last_epoch are given as kwargs
+        return schedule_func(
+            optimizer, **lr_scheduler_kwargs
+        )  # step_rules and last_epoch are given as kwargs
 
     name = SchedulerType(name)
     schedule_func = TYPE_TO_SCHEDULER_FUNCTION[name]
 
     if name == SchedulerType.CONSTANT:
-        return wrap_check_needless_num_warmup_steps(schedule_func(optimizer, **lr_scheduler_kwargs))
+        return wrap_check_needless_num_warmup_steps(
+            schedule_func(optimizer, **lr_scheduler_kwargs)
+        )
 
     # All other schedulers require `num_warmup_steps`
     if num_warmup_steps is None:
-        raise ValueError(f"{name} requires `num_warmup_steps`, please provide that argument.")
+        raise ValueError(
+            f"{name} requires `num_warmup_steps`, please provide that argument."
+        )
 
     if name == SchedulerType.CONSTANT_WITH_WARMUP:
-        return schedule_func(optimizer, num_warmup_steps=num_warmup_steps, **lr_scheduler_kwargs)
+        return schedule_func(
+            optimizer, num_warmup_steps=num_warmup_steps, **lr_scheduler_kwargs
+        )
 
     if name == SchedulerType.INVERSE_SQRT:
-        return schedule_func(optimizer, num_warmup_steps=num_warmup_steps, timescale=timescale, **lr_scheduler_kwargs)
+        return schedule_func(
+            optimizer,
+            num_warmup_steps=num_warmup_steps,
+            timescale=timescale,
+            **lr_scheduler_kwargs,
+        )
 
     # All other schedulers require `num_training_steps`
     if num_training_steps is None:
-        raise ValueError(f"{name} requires `num_training_steps`, please provide that argument.")
+        raise ValueError(
+            f"{name} requires `num_training_steps`, please provide that argument."
+        )
 
     if name == SchedulerType.COSINE_WITH_RESTARTS:
         return schedule_func(
@@ -5060,7 +5737,11 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
 
     if name == SchedulerType.POLYNOMIAL:
         return schedule_func(
-            optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps, power=power, **lr_scheduler_kwargs
+            optimizer,
+            num_warmup_steps=num_warmup_steps,
+            num_training_steps=num_training_steps,
+            power=power,
+            **lr_scheduler_kwargs,
         )
 
     if name == SchedulerType.COSINE_WITH_MIN_LR:
@@ -5084,7 +5765,9 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
 
     # All other schedulers require `num_decay_steps`
     if num_decay_steps is None:
-        raise ValueError(f"{name} requires `num_decay_steps`, please provide that argument.")
+        raise ValueError(
+            f"{name} requires `num_decay_steps`, please provide that argument."
+        )
     if name == SchedulerType.WARMUP_STABLE_DECAY:
         return schedule_func(
             optimizer,
@@ -5121,9 +5804,12 @@ def prepare_dataset_args(args: argparse.Namespace, support_metadata: bool):
         ), f"resolution must be 'size' or 'width,height': {args.resolution}"
 
     if args.face_crop_aug_range is not None:
-        args.face_crop_aug_range = tuple([float(r) for r in args.face_crop_aug_range.split(",")])
+        args.face_crop_aug_range = tuple(
+            [float(r) for r in args.face_crop_aug_range.split(",")]
+        )
         assert (
-            len(args.face_crop_aug_range) == 2 and args.face_crop_aug_range[0] <= args.face_crop_aug_range[1]
+            len(args.face_crop_aug_range) == 2
+            and args.face_crop_aug_range[0] <= args.face_crop_aug_range[1]
         ), f"face_crop_aug_range must be two floats: {args.face_crop_aug_range}"
     else:
         args.face_crop_aug_range = None
@@ -5144,7 +5830,12 @@ def prepare_accelerator(args: argparse.Namespace):
         logging_dir = None
     else:
         log_prefix = "" if args.log_prefix is None else args.log_prefix
-        logging_dir = args.logging_dir + "/" + log_prefix + time.strftime("%Y%m%d%H%M%S", time.localtime())
+        logging_dir = (
+            args.logging_dir
+            + "/"
+            + log_prefix
+            + time.strftime("%Y%m%d%H%M%S", time.localtime())
+        )
 
     if args.log_with is None:
         if logging_dir is not None:
@@ -5175,18 +5866,30 @@ def prepare_accelerator(args: argparse.Namespace):
     kwargs_handlers = [
         (
             InitProcessGroupKwargs(
-                backend="gloo" if os.name == "nt" or not torch.cuda.is_available() else "nccl",
-                init_method=(
-                    "env://?use_libuv=False" if os.name == "nt" and Version(torch.__version__) >= Version("2.4.0") else None
+                backend=(
+                    "gloo"
+                    if os.name == "nt" or not torch.cuda.is_available()
+                    else "nccl"
                 ),
-                timeout=datetime.timedelta(minutes=args.ddp_timeout) if args.ddp_timeout else None,
+                init_method=(
+                    "env://?use_libuv=False"
+                    if os.name == "nt"
+                    and Version(torch.__version__) >= Version("2.4.0")
+                    else None
+                ),
+                timeout=(
+                    datetime.timedelta(minutes=args.ddp_timeout)
+                    if args.ddp_timeout
+                    else None
+                ),
             )
             if torch.cuda.device_count() > 1
             else None
         ),
         (
             DistributedDataParallelKwargs(
-                gradient_as_bucket_view=args.ddp_gradient_as_bucket_view, static_graph=args.ddp_static_graph
+                gradient_as_bucket_view=args.ddp_gradient_as_bucket_view,
+                static_graph=args.ddp_static_graph,
             )
             if args.ddp_gradient_as_bucket_view or args.ddp_static_graph
             else None
@@ -5226,20 +5929,36 @@ def prepare_dtype(args: argparse.Namespace):
     return weight_dtype, save_dtype
 
 
-def _load_target_model(args: argparse.Namespace, weight_dtype, device="cpu", unet_use_linear_projection_in_v2=False):
+def _load_target_model(
+    args: argparse.Namespace,
+    weight_dtype,
+    device="cpu",
+    unet_use_linear_projection_in_v2=False,
+):
     name_or_path = args.pretrained_model_name_or_path
-    name_or_path = os.path.realpath(name_or_path) if os.path.islink(name_or_path) else name_or_path
-    load_stable_diffusion_format = os.path.isfile(name_or_path)  # determine SD or Diffusers
+    name_or_path = (
+        os.path.realpath(name_or_path) if os.path.islink(name_or_path) else name_or_path
+    )
+    load_stable_diffusion_format = os.path.isfile(
+        name_or_path
+    )  # determine SD or Diffusers
     if load_stable_diffusion_format:
         logger.info(f"load StableDiffusion checkpoint: {name_or_path}")
-        text_encoder, vae, unet = model_util.load_models_from_stable_diffusion_checkpoint(
-            args.v2, name_or_path, device, unet_use_linear_projection_in_v2=unet_use_linear_projection_in_v2
+        text_encoder, vae, unet = (
+            model_util.load_models_from_stable_diffusion_checkpoint(
+                args.v2,
+                name_or_path,
+                device,
+                unet_use_linear_projection_in_v2=unet_use_linear_projection_in_v2,
+            )
         )
     else:
         # Diffusers model is loaded to CPU
         logger.info(f"load Diffusers pretrained models: {name_or_path}")
         try:
-            pipe = StableDiffusionPipeline.from_pretrained(name_or_path, tokenizer=None, safety_checker=None)
+            pipe = StableDiffusionPipeline.from_pretrained(
+                name_or_path, tokenizer=None, safety_checker=None
+            )
         except EnvironmentError as ex:
             logger.error(
                 f"model is not found as a file or in Hugging Face, perhaps file name is wrong? {name_or_path}"
@@ -5272,10 +5991,14 @@ def _load_target_model(args: argparse.Namespace, weight_dtype, device="cpu", une
     return text_encoder, vae, unet, load_stable_diffusion_format
 
 
-def load_target_model(args, weight_dtype, accelerator, unet_use_linear_projection_in_v2=False):
+def load_target_model(
+    args, weight_dtype, accelerator, unet_use_linear_projection_in_v2=False
+):
     for pi in range(accelerator.state.num_processes):
         if pi == accelerator.state.local_process_index:
-            logger.info(f"loading model for process {accelerator.state.local_process_index}/{accelerator.state.num_processes}")
+            logger.info(
+                f"loading model for process {accelerator.state.local_process_index}/{accelerator.state.num_processes}"
+            )
 
             text_encoder, vae, unet, load_stable_diffusion_format = _load_target_model(
                 args,
@@ -5303,7 +6026,9 @@ def patch_accelerator_for_fp16_training(accelerator):
     accelerator.scaler._unscale_grads_ = _unscale_grads_replacer
 
 
-def get_hidden_states(args: argparse.Namespace, input_ids, tokenizer, text_encoder, weight_dtype=None):
+def get_hidden_states(
+    args: argparse.Namespace, input_ids, tokenizer, text_encoder, weight_dtype=None
+):
     # with no_token_padding, the length is not max length, return result immediately
     if input_ids.size()[-1] != tokenizer.model_max_length:
         return text_encoder(input_ids)[0]
@@ -5317,23 +6042,33 @@ def get_hidden_states(args: argparse.Namespace, input_ids, tokenizer, text_encod
     else:
         enc_out = text_encoder(input_ids, output_hidden_states=True, return_dict=True)
         encoder_hidden_states = enc_out["hidden_states"][-args.clip_skip]
-        encoder_hidden_states = text_encoder.text_model.final_layer_norm(encoder_hidden_states)
+        encoder_hidden_states = text_encoder.text_model.final_layer_norm(
+            encoder_hidden_states
+        )
 
     # bs*3, 77, 768 or 1024
-    encoder_hidden_states = encoder_hidden_states.reshape((b_size, -1, encoder_hidden_states.shape[-1]))
+    encoder_hidden_states = encoder_hidden_states.reshape(
+        (b_size, -1, encoder_hidden_states.shape[-1])
+    )
 
     if args.max_token_length is not None:
         if args.v2:
             # v2: <BOS>...<EOS> <PAD> ... の三連を <BOS>...<EOS> <PAD> ... へ戻す　正直この実装でいいのかわからん
             states_list = [encoder_hidden_states[:, 0].unsqueeze(1)]  # <BOS>
             for i in range(1, args.max_token_length, tokenizer.model_max_length):
-                chunk = encoder_hidden_states[:, i : i + tokenizer.model_max_length - 2]  # <BOS> の後から 最後の前まで
+                chunk = encoder_hidden_states[
+                    :, i : i + tokenizer.model_max_length - 2
+                ]  # <BOS> の後から 最後の前まで
                 if i > 0:
                     for j in range(len(chunk)):
-                        if input_ids[j, 1] == tokenizer.eos_token:  # 空、つまり <BOS> <EOS> <PAD> ...のパターン
+                        if (
+                            input_ids[j, 1] == tokenizer.eos_token
+                        ):  # 空、つまり <BOS> <EOS> <PAD> ...のパターン
                             chunk[j, 0] = chunk[j, 1]  # 次の <PAD> の値をコピーする
                 states_list.append(chunk)  # <BOS> の後から <EOS> の前まで
-            states_list.append(encoder_hidden_states[:, -1].unsqueeze(1))  # <EOS> か <PAD> のどちらか
+            states_list.append(
+                encoder_hidden_states[:, -1].unsqueeze(1)
+            )  # <EOS> か <PAD> のどちらか
             encoder_hidden_states = torch.cat(states_list, dim=1)
         else:
             # v1: <BOS>...<EOS> の三連を <BOS>...<EOS> へ戻す
@@ -5353,7 +6088,10 @@ def get_hidden_states(args: argparse.Namespace, input_ids, tokenizer, text_encod
 
 
 def pool_workaround(
-    text_encoder: CLIPTextModelWithProjection, last_hidden_state: torch.Tensor, input_ids: torch.Tensor, eos_token_id: int
+    text_encoder: CLIPTextModelWithProjection,
+    last_hidden_state: torch.Tensor,
+    input_ids: torch.Tensor,
+    eos_token_id: int,
 ):
     r"""
     workaround for CLIP's pooling bug: it returns the hidden states for the max token id as the pooled output
@@ -5382,14 +6120,21 @@ def pool_workaround(
     eos_token_mask = (input_ids == eos_token_id).int()
 
     # Use argmax to find the last index of the EOS token for each element in the batch
-    eos_token_index = torch.argmax(eos_token_mask, dim=1)  # this will be 0 if there is no EOS token, it's fine
+    eos_token_index = torch.argmax(
+        eos_token_mask, dim=1
+    )  # this will be 0 if there is no EOS token, it's fine
     eos_token_index = eos_token_index.to(device=last_hidden_state.device)
 
     # get hidden states for EOS token
-    pooled_output = last_hidden_state[torch.arange(last_hidden_state.shape[0], device=last_hidden_state.device), eos_token_index]
+    pooled_output = last_hidden_state[
+        torch.arange(last_hidden_state.shape[0], device=last_hidden_state.device),
+        eos_token_index,
+    ]
 
     # apply projection: projection may be of different dtype than last_hidden_state
-    pooled_output = text_encoder.text_projection(pooled_output.to(text_encoder.text_projection.weight.dtype))
+    pooled_output = text_encoder.text_projection(
+        pooled_output.to(text_encoder.text_projection.weight.dtype)
+    )
     pooled_output = pooled_output.to(last_hidden_state.dtype)
 
     return pooled_output
@@ -5408,8 +6153,12 @@ def get_hidden_states_sdxl(
 ):
     # input_ids: b,n,77 -> b*n, 77
     b_size = input_ids1.size()[0]
-    input_ids1 = input_ids1.reshape((-1, tokenizer1.model_max_length))  # batch_size*n, 77
-    input_ids2 = input_ids2.reshape((-1, tokenizer2.model_max_length))  # batch_size*n, 77
+    input_ids1 = input_ids1.reshape(
+        (-1, tokenizer1.model_max_length)
+    )  # batch_size*n, 77
+    input_ids2 = input_ids2.reshape(
+        (-1, tokenizer2.model_max_length)
+    )  # batch_size*n, 77
 
     # text_encoder1
     enc_out = text_encoder1(input_ids1, output_hidden_states=True, return_dict=True)
@@ -5420,8 +6169,17 @@ def get_hidden_states_sdxl(
     hidden_states2 = enc_out["hidden_states"][-2]  # penuultimate layer
 
     # pool2 = enc_out["text_embeds"]
-    unwrapped_text_encoder2 = text_encoder2 if accelerator is None else accelerator.unwrap_model(text_encoder2)
-    pool2 = pool_workaround(unwrapped_text_encoder2, enc_out["last_hidden_state"], input_ids2, tokenizer2.eos_token_id)
+    unwrapped_text_encoder2 = (
+        text_encoder2
+        if accelerator is None
+        else accelerator.unwrap_model(text_encoder2)
+    )
+    pool2 = pool_workaround(
+        unwrapped_text_encoder2,
+        enc_out["last_hidden_state"],
+        input_ids2,
+        tokenizer2.eos_token_id,
+    )
 
     # b*n, 77, 768 or 1280 -> b, n*77, 768 or 1280
     n_size = 1 if max_token_length is None else max_token_length // 75
@@ -5433,14 +6191,18 @@ def get_hidden_states_sdxl(
         # encoder1: <BOS>...<EOS> の三連を <BOS>...<EOS> へ戻す
         states_list = [hidden_states1[:, 0].unsqueeze(1)]  # <BOS>
         for i in range(1, max_token_length, tokenizer1.model_max_length):
-            states_list.append(hidden_states1[:, i : i + tokenizer1.model_max_length - 2])  # <BOS> の後から <EOS> の前まで
+            states_list.append(
+                hidden_states1[:, i : i + tokenizer1.model_max_length - 2]
+            )  # <BOS> の後から <EOS> の前まで
         states_list.append(hidden_states1[:, -1].unsqueeze(1))  # <EOS>
         hidden_states1 = torch.cat(states_list, dim=1)
 
         # v2: <BOS>...<EOS> <PAD> ... の三連を <BOS>...<EOS> <PAD> ... へ戻す　正直この実装でいいのかわからん
         states_list = [hidden_states2[:, 0].unsqueeze(1)]  # <BOS>
         for i in range(1, max_token_length, tokenizer2.model_max_length):
-            chunk = hidden_states2[:, i : i + tokenizer2.model_max_length - 2]  # <BOS> の後から 最後の前まで
+            chunk = hidden_states2[
+                :, i : i + tokenizer2.model_max_length - 2
+            ]  # <BOS> の後から 最後の前まで
             # this causes an error:
             # RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation
             # if i > 1:
@@ -5448,7 +6210,9 @@ def get_hidden_states_sdxl(
             #         if input_ids2[n_index + j * n_size, 1] == tokenizer2.eos_token_id:  # 空、つまり <BOS> <EOS> <PAD> ...のパターン
             #             chunk[j, 0] = chunk[j, 1]  # 次の <PAD> の値をコピーする
             states_list.append(chunk)  # <BOS> の後から <EOS> の前まで
-        states_list.append(hidden_states2[:, -1].unsqueeze(1))  # <EOS> か <PAD> のどちらか
+        states_list.append(
+            hidden_states2[:, -1].unsqueeze(1)
+        )  # <EOS> か <PAD> のどちらか
         hidden_states2 = torch.cat(states_list, dim=1)
 
         # pool はnの最初のものを使う
@@ -5522,14 +6286,31 @@ def save_sd_model_on_epoch_end_or_stepwise(
     vae,
 ):
     def sd_saver(ckpt_file, epoch_no, global_step):
-        sai_metadata = get_sai_model_spec(None, args, False, False, False, is_stable_diffusion_ckpt=True)
+        sai_metadata = get_sai_model_spec(
+            None, args, False, False, False, is_stable_diffusion_ckpt=True
+        )
         model_util.save_stable_diffusion_checkpoint(
-            args.v2, ckpt_file, text_encoder, unet, src_path, epoch_no, global_step, sai_metadata, save_dtype, vae
+            args.v2,
+            ckpt_file,
+            text_encoder,
+            unet,
+            src_path,
+            epoch_no,
+            global_step,
+            sai_metadata,
+            save_dtype,
+            vae,
         )
 
     def diffusers_saver(out_dir):
         model_util.save_diffusers_checkpoint(
-            args.v2, out_dir, text_encoder, unet, src_path, vae=vae, use_safetensors=use_safetensors
+            args.v2,
+            out_dir,
+            text_encoder,
+            unet,
+            src_path,
+            vae=vae,
+            use_safetensors=use_safetensors,
         )
 
     save_sd_model_on_epoch_end_or_stepwise_common(
@@ -5560,7 +6341,9 @@ def save_sd_model_on_epoch_end_or_stepwise_common(
 ):
     if on_epoch_end:
         epoch_no = epoch + 1
-        saving = epoch_no % args.save_every_n_epochs == 0 and epoch_no < num_train_epochs
+        saving = (
+            epoch_no % args.save_every_n_epochs == 0 and epoch_no < num_train_epochs
+        )
         if not saving:
             return
 
@@ -5570,7 +6353,9 @@ def save_sd_model_on_epoch_end_or_stepwise_common(
         # 保存するか否かは呼び出し側で判断済み
 
         model_name = default_if_none(args.output_name, DEFAULT_STEP_NAME)
-        epoch_no = epoch  # 例: 最初のepochの途中で保存したら0になる、SDモデルに保存される
+        epoch_no = (
+            epoch  # 例: 最初のepochの途中で保存したら0になる、SDモデルに保存される
+        )
         remove_no = get_remove_step_no(args, global_step)
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -5603,9 +6388,13 @@ def save_sd_model_on_epoch_end_or_stepwise_common(
 
     else:
         if on_epoch_end:
-            out_dir = os.path.join(args.output_dir, EPOCH_DIFFUSERS_DIR_NAME.format(model_name, epoch_no))
+            out_dir = os.path.join(
+                args.output_dir, EPOCH_DIFFUSERS_DIR_NAME.format(model_name, epoch_no)
+            )
         else:
-            out_dir = os.path.join(args.output_dir, STEP_DIFFUSERS_DIR_NAME.format(model_name, global_step))
+            out_dir = os.path.join(
+                args.output_dir, STEP_DIFFUSERS_DIR_NAME.format(model_name, global_step)
+            )
 
         logger.info(f"saving model: {out_dir}")
         diffusers_saver(out_dir)
@@ -5616,9 +6405,15 @@ def save_sd_model_on_epoch_end_or_stepwise_common(
         # remove older checkpoints
         if remove_no is not None:
             if on_epoch_end:
-                remove_out_dir = os.path.join(args.output_dir, EPOCH_DIFFUSERS_DIR_NAME.format(model_name, remove_no))
+                remove_out_dir = os.path.join(
+                    args.output_dir,
+                    EPOCH_DIFFUSERS_DIR_NAME.format(model_name, remove_no),
+                )
             else:
-                remove_out_dir = os.path.join(args.output_dir, STEP_DIFFUSERS_DIR_NAME.format(model_name, remove_no))
+                remove_out_dir = os.path.join(
+                    args.output_dir,
+                    STEP_DIFFUSERS_DIR_NAME.format(model_name, remove_no),
+                )
 
             if os.path.exists(remove_out_dir):
                 logger.info(f"removing old model: {remove_out_dir}")
@@ -5637,16 +6432,26 @@ def save_and_remove_state_on_epoch_end(args: argparse.Namespace, accelerator, ep
     logger.info(f"saving state at epoch {epoch_no}")
     os.makedirs(args.output_dir, exist_ok=True)
 
-    state_dir = os.path.join(args.output_dir, EPOCH_STATE_NAME.format(model_name, epoch_no))
+    state_dir = os.path.join(
+        args.output_dir, EPOCH_STATE_NAME.format(model_name, epoch_no)
+    )
     accelerator.save_state(state_dir)
     if args.save_state_to_huggingface:
         logger.info("uploading state to huggingface.")
-        huggingface_util.upload(args, state_dir, "/" + EPOCH_STATE_NAME.format(model_name, epoch_no))
+        huggingface_util.upload(
+            args, state_dir, "/" + EPOCH_STATE_NAME.format(model_name, epoch_no)
+        )
 
-    last_n_epochs = args.save_last_n_epochs_state if args.save_last_n_epochs_state else args.save_last_n_epochs
+    last_n_epochs = (
+        args.save_last_n_epochs_state
+        if args.save_last_n_epochs_state
+        else args.save_last_n_epochs
+    )
     if last_n_epochs is not None:
         remove_epoch_no = epoch_no - args.save_every_n_epochs * last_n_epochs
-        state_dir_old = os.path.join(args.output_dir, EPOCH_STATE_NAME.format(model_name, remove_epoch_no))
+        state_dir_old = os.path.join(
+            args.output_dir, EPOCH_STATE_NAME.format(model_name, remove_epoch_no)
+        )
         if os.path.exists(state_dir_old):
             logger.info(f"removing old state: {state_dir_old}")
             shutil.rmtree(state_dir_old)
@@ -5658,20 +6463,30 @@ def save_and_remove_state_stepwise(args: argparse.Namespace, accelerator, step_n
     logger.info(f"saving state at step {step_no}")
     os.makedirs(args.output_dir, exist_ok=True)
 
-    state_dir = os.path.join(args.output_dir, STEP_STATE_NAME.format(model_name, step_no))
+    state_dir = os.path.join(
+        args.output_dir, STEP_STATE_NAME.format(model_name, step_no)
+    )
     accelerator.save_state(state_dir)
     if args.save_state_to_huggingface:
         logger.info("uploading state to huggingface.")
-        huggingface_util.upload(args, state_dir, "/" + STEP_STATE_NAME.format(model_name, step_no))
+        huggingface_util.upload(
+            args, state_dir, "/" + STEP_STATE_NAME.format(model_name, step_no)
+        )
 
-    last_n_steps = args.save_last_n_steps_state if args.save_last_n_steps_state else args.save_last_n_steps
+    last_n_steps = (
+        args.save_last_n_steps_state
+        if args.save_last_n_steps_state
+        else args.save_last_n_steps
+    )
     if last_n_steps is not None:
         # calculate step_no to remove by finding the largest multiple of save_every_n_steps that is at least last_n_steps before current step_no
         remove_step_no = step_no - last_n_steps - 1
         remove_step_no = remove_step_no - (remove_step_no % args.save_every_n_steps)
 
         if remove_step_no > 0:
-            state_dir_old = os.path.join(args.output_dir, STEP_STATE_NAME.format(model_name, remove_step_no))
+            state_dir_old = os.path.join(
+                args.output_dir, STEP_STATE_NAME.format(model_name, remove_step_no)
+            )
             if os.path.exists(state_dir_old):
                 logger.info(f"removing old state: {state_dir_old}")
                 shutil.rmtree(state_dir_old)
@@ -5688,7 +6503,9 @@ def save_state_on_train_end(args: argparse.Namespace, accelerator):
 
     if args.save_state_to_huggingface:
         logger.info("uploading last state to huggingface.")
-        huggingface_util.upload(args, state_dir, "/" + LAST_STATE_NAME.format(model_name))
+        huggingface_util.upload(
+            args, state_dir, "/" + LAST_STATE_NAME.format(model_name)
+        )
 
 
 def save_sd_model_on_train_end(
@@ -5704,18 +6521,41 @@ def save_sd_model_on_train_end(
     vae,
 ):
     def sd_saver(ckpt_file, epoch_no, global_step):
-        sai_metadata = get_sai_model_spec(None, args, False, False, False, is_stable_diffusion_ckpt=True)
+        sai_metadata = get_sai_model_spec(
+            None, args, False, False, False, is_stable_diffusion_ckpt=True
+        )
         model_util.save_stable_diffusion_checkpoint(
-            args.v2, ckpt_file, text_encoder, unet, src_path, epoch_no, global_step, sai_metadata, save_dtype, vae
+            args.v2,
+            ckpt_file,
+            text_encoder,
+            unet,
+            src_path,
+            epoch_no,
+            global_step,
+            sai_metadata,
+            save_dtype,
+            vae,
         )
 
     def diffusers_saver(out_dir):
         model_util.save_diffusers_checkpoint(
-            args.v2, out_dir, text_encoder, unet, src_path, vae=vae, use_safetensors=use_safetensors
+            args.v2,
+            out_dir,
+            text_encoder,
+            unet,
+            src_path,
+            vae=vae,
+            use_safetensors=use_safetensors,
         )
 
     save_sd_model_on_train_end_common(
-        args, save_stable_diffusion_format, use_safetensors, epoch, global_step, sd_saver, diffusers_saver
+        args,
+        save_stable_diffusion_format,
+        use_safetensors,
+        epoch,
+        global_step,
+        sd_saver,
+        diffusers_saver,
     )
 
 
@@ -5740,7 +6580,9 @@ def save_sd_model_on_train_end_common(
         sd_saver(ckpt_file, epoch, global_step)
 
         if args.huggingface_repo_id is not None:
-            huggingface_util.upload(args, ckpt_file, "/" + ckpt_name, force_sync_upload=True)
+            huggingface_util.upload(
+                args, ckpt_file, "/" + ckpt_name, force_sync_upload=True
+            )
     else:
         out_dir = os.path.join(args.output_dir, model_name)
         os.makedirs(out_dir, exist_ok=True)
@@ -5749,10 +6591,14 @@ def save_sd_model_on_train_end_common(
         diffusers_saver(out_dir)
 
         if args.huggingface_repo_id is not None:
-            huggingface_util.upload(args, out_dir, "/" + model_name, force_sync_upload=True)
+            huggingface_util.upload(
+                args, out_dir, "/" + model_name, force_sync_upload=True
+            )
 
 
-def get_timesteps(min_timestep: int, max_timestep: int, b_size: int, device: torch.device) -> torch.Tensor:
+def get_timesteps(
+    min_timestep: int, max_timestep: int, b_size: int, device: torch.device
+) -> torch.Tensor:
     if min_timestep < max_timestep:
         timesteps = torch.randint(min_timestep, max_timestep, (b_size,), device="cpu")
     else:
@@ -5771,16 +6617,25 @@ def get_noise_noisy_latents_and_timesteps(
             noise_offset = torch.rand(1, device=latents.device) * args.noise_offset
         else:
             noise_offset = args.noise_offset
-        noise = custom_train_functions.apply_noise_offset(latents, noise, noise_offset, args.adaptive_noise_scale)
+        noise = custom_train_functions.apply_noise_offset(
+            latents, noise, noise_offset, args.adaptive_noise_scale
+        )
     if args.multires_noise_iterations:
         noise = custom_train_functions.pyramid_noise_like(
-            noise, latents.device, args.multires_noise_iterations, args.multires_noise_discount
+            noise,
+            latents.device,
+            args.multires_noise_iterations,
+            args.multires_noise_discount,
         )
 
     # Sample a random timestep for each image
     b_size = latents.shape[0]
     min_timestep = 0 if args.min_timestep is None else args.min_timestep
-    max_timestep = noise_scheduler.config.num_train_timesteps if args.max_timestep is None else args.max_timestep
+    max_timestep = (
+        noise_scheduler.config.num_train_timesteps
+        if args.max_timestep is None
+        else args.max_timestep
+    )
 
     timesteps = get_timesteps(min_timestep, max_timestep, b_size, latents.device)
 
@@ -5791,14 +6646,18 @@ def get_noise_noisy_latents_and_timesteps(
             strength = torch.rand(1, device=latents.device) * args.ip_noise_gamma
         else:
             strength = args.ip_noise_gamma
-        noisy_latents = noise_scheduler.add_noise(latents, noise + strength * torch.randn_like(latents), timesteps)
+        noisy_latents = noise_scheduler.add_noise(
+            latents, noise + strength * torch.randn_like(latents), timesteps
+        )
     else:
         noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
 
     return noise, noisy_latents, timesteps
 
 
-def get_huber_threshold_if_needed(args, timesteps: torch.Tensor, noise_scheduler) -> Optional[torch.Tensor]:
+def get_huber_threshold_if_needed(
+    args, timesteps: torch.Tensor, noise_scheduler
+) -> Optional[torch.Tensor]:
     if not (args.loss_type == "huber" or args.loss_type == "smooth_l1"):
         return None
 
@@ -5808,13 +6667,19 @@ def get_huber_threshold_if_needed(args, timesteps: torch.Tensor, noise_scheduler
         result = torch.exp(-alpha * timesteps) * args.huber_scale
     elif args.huber_schedule == "snr":
         if not hasattr(noise_scheduler, "alphas_cumprod"):
-            raise NotImplementedError("Huber schedule 'snr' is not supported with the current model.")
-        alphas_cumprod = torch.index_select(noise_scheduler.alphas_cumprod, 0, timesteps.cpu())
+            raise NotImplementedError(
+                "Huber schedule 'snr' is not supported with the current model."
+            )
+        alphas_cumprod = torch.index_select(
+            noise_scheduler.alphas_cumprod, 0, timesteps.cpu()
+        )
         sigmas = ((1.0 - alphas_cumprod) / alphas_cumprod) ** 0.5
         result = (1 - args.huber_c) / (1 + sigmas) ** 2 + args.huber_c
         result = result.to(timesteps.device)
     elif args.huber_schedule == "constant":
-        result = torch.full((b_size,), args.huber_c * args.huber_scale, device=timesteps.device)
+        result = torch.full(
+            (b_size,), args.huber_c * args.huber_scale, device=timesteps.device
+        )
     else:
         raise NotImplementedError(f"Unknown Huber loss schedule {args.huber_schedule}!")
 
@@ -5822,7 +6687,11 @@ def get_huber_threshold_if_needed(args, timesteps: torch.Tensor, noise_scheduler
 
 
 def conditional_loss(
-    model_pred: torch.Tensor, target: torch.Tensor, loss_type: str, reduction: str, huber_c: Optional[torch.Tensor] = None
+    model_pred: torch.Tensor,
+    target: torch.Tensor,
+    loss_type: str,
+    reduction: str,
+    huber_c: Optional[torch.Tensor] = None,
 ):
     """
     NOTE: if you're using the scheduled version, huber_c has to depend on the timesteps already
@@ -5835,7 +6704,11 @@ def conditional_loss(
         if huber_c is None:
             raise NotImplementedError("huber_c not implemented correctly")
         huber_c = huber_c.view(-1, 1, 1, 1)
-        loss = 2 * huber_c * (torch.sqrt((model_pred - target) ** 2 + huber_c**2) - huber_c)
+        loss = (
+            2
+            * huber_c
+            * (torch.sqrt((model_pred - target) ** 2 + huber_c**2) - huber_c)
+        )
         if reduction == "mean":
             loss = torch.mean(loss)
         elif reduction == "sum":
@@ -5872,9 +6745,13 @@ def append_lr_to_logs_with_names(logs, lr_scheduler, optimizer_type, names):
         name = names[lr_index]
         logs["lr/" + name] = float(lrs[lr_index])
 
-        if optimizer_type.lower().startswith("DAdapt".lower()) or optimizer_type.lower() == "Prodigy".lower():
+        if (
+            optimizer_type.lower().startswith("DAdapt".lower())
+            or optimizer_type.lower() == "Prodigy".lower()
+        ):
             logs["lr/d*lr/" + name] = (
-                lr_scheduler.optimizers[-1].param_groups[lr_index]["d"] * lr_scheduler.optimizers[-1].param_groups[lr_index]["lr"]
+                lr_scheduler.optimizers[-1].param_groups[lr_index]["d"]
+                * lr_scheduler.optimizers[-1].param_groups[lr_index]["lr"]
             )
 
 
@@ -5929,7 +6806,10 @@ def get_my_scheduler(
     )
 
     # clip_sample=Trueにする
-    if hasattr(scheduler.config, "clip_sample") and scheduler.config.clip_sample is False:
+    if (
+        hasattr(scheduler.config, "clip_sample")
+        and scheduler.config.clip_sample is False
+    ):
         # logger.info("set clip_sample to True")
         scheduler.config.clip_sample = True
 
@@ -5937,7 +6817,9 @@ def get_my_scheduler(
 
 
 def sample_images(*args, **kwargs):
-    return sample_images_common(StableDiffusionLongPromptWeightingPipeline, *args, **kwargs)
+    return sample_images_common(
+        StableDiffusionLongPromptWeightingPipeline, *args, **kwargs
+    )
 
 
 def line_to_prompt_dict(line: str) -> dict:
@@ -6000,11 +6882,15 @@ def load_prompts(prompt_file: str) -> List[Dict]:
     if prompt_file.endswith(".txt"):
         with open(prompt_file, "r", encoding="utf-8") as f:
             lines = f.readlines()
-        prompts = [line.strip() for line in lines if len(line.strip()) > 0 and line[0] != "#"]
+        prompts = [
+            line.strip() for line in lines if len(line.strip()) > 0 and line[0] != "#"
+        ]
     elif prompt_file.endswith(".toml"):
         with open(prompt_file, "r", encoding="utf-8") as f:
             data = toml.load(f)
-        prompts = [dict(**data["prompt"], **subset) for subset in data["prompt"]["subset"]]
+        prompts = [
+            dict(**data["prompt"], **subset) for subset in data["prompt"]["subset"]
+        ]
     elif prompt_file.endswith(".json"):
         with open(prompt_file, "r", encoding="utf-8") as f:
             prompts = json.load(f)
@@ -6056,7 +6942,9 @@ def sample_images_common(
             if epoch is None or epoch % args.sample_every_n_epochs != 0:
                 return
         else:
-            if steps % args.sample_every_n_steps != 0 or epoch is not None:  # steps is not divisible or end of epoch
+            if (
+                steps % args.sample_every_n_steps != 0 or epoch is not None
+            ):  # steps is not divisible or end of epoch
                 return
 
     logger.info(f"generating sample images at step: {steps}")
@@ -6064,10 +6952,14 @@ def sample_images_common(
         logger.error(f"No prompt file: {args.sample_prompts}")
         return
 
-    distributed_state = PartialState()  # for multi gpu distributed inference. this is a singleton, so it's safe to use it here
+    distributed_state = (
+        PartialState()
+    )  # for multi gpu distributed inference. this is a singleton, so it's safe to use it here
 
     org_vae_device = vae.device  # CPUにいるはず
-    vae.to(distributed_state.device)  # distributed_state.device is same as accelerator.device
+    vae.to(
+        distributed_state.device
+    )  # distributed_state.device is same as accelerator.device
 
     # unwrap unet and text_encoder(s)
     unet = accelerator.unwrap_model(unet)
@@ -6080,16 +6972,22 @@ def sample_images_common(
     if args.sample_prompts.endswith(".txt"):
         with open(args.sample_prompts, "r", encoding="utf-8") as f:
             lines = f.readlines()
-        prompts = [line.strip() for line in lines if len(line.strip()) > 0 and line[0] != "#"]
+        prompts = [
+            line.strip() for line in lines if len(line.strip()) > 0 and line[0] != "#"
+        ]
     elif args.sample_prompts.endswith(".toml"):
         with open(args.sample_prompts, "r", encoding="utf-8") as f:
             data = toml.load(f)
-        prompts = [dict(**data["prompt"], **subset) for subset in data["prompt"]["subset"]]
+        prompts = [
+            dict(**data["prompt"], **subset) for subset in data["prompt"]["subset"]
+        ]
     elif args.sample_prompts.endswith(".json"):
         with open(args.sample_prompts, "r", encoding="utf-8") as f:
             prompts = json.load(f)
 
-    default_scheduler = get_my_scheduler(sample_sampler=args.sample_sampler, v_parameterization=args.v_parameterization)
+    default_scheduler = get_my_scheduler(
+        sample_sampler=args.sample_sampler, v_parameterization=args.v_parameterization
+    )
 
     pipeline = pipe_class(
         text_encoder=text_encoder,
@@ -6122,7 +7020,9 @@ def sample_images_common(
     rng_state = torch.get_rng_state()
     cuda_rng_state = None
     try:
-        cuda_rng_state = torch.cuda.get_rng_state() if torch.cuda.is_available() else None
+        cuda_rng_state = (
+            torch.cuda.get_rng_state() if torch.cuda.is_available() else None
+        )
     except Exception:
         pass
 
@@ -6131,7 +7031,15 @@ def sample_images_common(
         with torch.no_grad():
             for prompt_dict in prompts:
                 sample_image_inference(
-                    accelerator, args, pipeline, save_dir, prompt_dict, epoch, steps, prompt_replacement, controlnet=controlnet
+                    accelerator,
+                    args,
+                    pipeline,
+                    save_dir,
+                    prompt_dict,
+                    epoch,
+                    steps,
+                    prompt_replacement,
+                    controlnet=controlnet,
                 )
     else:
         # Creating list with N elements, where each element is a list of prompt_dicts, and N is the number of processes available (number of devices available)
@@ -6141,10 +7049,20 @@ def sample_images_common(
             per_process_prompts.append(prompts[i :: distributed_state.num_processes])
 
         with torch.no_grad():
-            with distributed_state.split_between_processes(per_process_prompts) as prompt_dict_lists:
+            with distributed_state.split_between_processes(
+                per_process_prompts
+            ) as prompt_dict_lists:
                 for prompt_dict in prompt_dict_lists[0]:
                     sample_image_inference(
-                        accelerator, args, pipeline, save_dir, prompt_dict, epoch, steps, prompt_replacement, controlnet=controlnet
+                        accelerator,
+                        args,
+                        pipeline,
+                        save_dir,
+                        prompt_dict,
+                        epoch,
+                        steps,
+                        prompt_replacement,
+                        controlnet=controlnet,
                     )
 
     # clear pipeline and cache to reduce vram usage
@@ -6161,7 +7079,10 @@ def sample_images_common(
 def sample_image_inference(
     accelerator: Accelerator,
     args: argparse.Namespace,
-    pipeline: Union[StableDiffusionLongPromptWeightingPipeline, SdxlStableDiffusionLongPromptWeightingPipeline],
+    pipeline: Union[
+        StableDiffusionLongPromptWeightingPipeline,
+        SdxlStableDiffusionLongPromptWeightingPipeline,
+    ],
     save_dir,
     prompt_dict,
     epoch,
@@ -6183,7 +7104,9 @@ def sample_image_inference(
     if prompt_replacement is not None:
         prompt = prompt.replace(prompt_replacement[0], prompt_replacement[1])
         if negative_prompt is not None:
-            negative_prompt = negative_prompt.replace(prompt_replacement[0], prompt_replacement[1])
+            negative_prompt = negative_prompt.replace(
+                prompt_replacement[0], prompt_replacement[1]
+            )
 
     if seed is not None:
         torch.manual_seed(seed)
@@ -6209,7 +7132,9 @@ def sample_image_inference(
     width = max(64, width - width % 8)  # round to divisible by 8
     logger.info(f"prompt: {prompt}")
     logger.info(f"negative_prompt: {negative_prompt}")
-    logger.info(f"height: {height} width: {width} sample_steps: {sample_steps} scale: {scale} sample_sampler: {sampler_name}{f' seed: {seed}' if seed is not None else ''}")
+    logger.info(
+        f"height: {height} width: {width} sample_steps: {sample_steps} scale: {scale} sample_sampler: {sampler_name}{f' seed: {seed}' if seed is not None else ''}"
+    )
 
     with accelerator.autocast():
         latents = pipeline(
@@ -6237,7 +7162,7 @@ def sample_image_inference(
         num_suffix = "000000"  # or you could use "initial" if you prefer
     else:
         num_suffix = f"e{epoch:06d}" if epoch is not None else f"{steps:06d}"
-        
+
     seed_suffix = "" if seed is None else f"_{seed}"
     i: int = prompt_dict["enum"]
     img_filename = f"{'' if args.output_name is None else args.output_name + '_'}{num_suffix}_{i:02d}_{ts_str}{seed_suffix}.png"
@@ -6250,10 +7175,14 @@ def sample_image_inference(
         import wandb
 
         # not to commit images to avoid inconsistency between training and logging steps
-        wandb_tracker.log({f"sample_{i}": wandb.Image(image, caption=prompt)}, commit=False)  # positive prompt as a caption
+        wandb_tracker.log(
+            {f"sample_{i}": wandb.Image(image, caption=prompt)}, commit=False
+        )  # positive prompt as a caption
 
 
-def init_trackers(accelerator: Accelerator, args: argparse.Namespace, default_tracker_name: str):
+def init_trackers(
+    accelerator: Accelerator, args: argparse.Namespace, default_tracker_name: str
+):
     """
     Initialize experiment trackers with tracker specific behaviors
     """
@@ -6264,7 +7193,11 @@ def init_trackers(accelerator: Accelerator, args: argparse.Namespace, default_tr
         if args.log_tracker_config is not None:
             init_kwargs = toml.load(args.log_tracker_config)
         accelerator.init_trackers(
-            default_tracker_name if args.log_tracker_name is None else args.log_tracker_name,
+            (
+                default_tracker_name
+                if args.log_tracker_name is None
+                else args.log_tracker_name
+            ),
             config=get_sanitized_config_or_none(args),
             init_kwargs=init_kwargs,
         )
@@ -6316,7 +7249,9 @@ class collator_class:
     def __init__(self, epoch, step, dataset):
         self.current_epoch = epoch
         self.current_step = step
-        self.dataset = dataset  # not used if worker_info is not None, in case of multiprocessing
+        self.dataset = (
+            dataset  # not used if worker_info is not None, in case of multiprocessing
+        )
 
     def __call__(self, examples):
         worker_info = torch.utils.data.get_worker_info()
@@ -6354,6 +7289,7 @@ class LossRecorder:
             return 0
         return self.loss_total / losses
 
+
 class Bitstream:
     """
     A stream of bits with methods for easy handling.
@@ -6368,6 +7304,7 @@ class Bitstream:
         bits = (self.bitstream >> self.shift) & bitmask
         self.shift += length
         return bits
+
 
 def get_jxl_metadata_from_bytesio(input):
     """
@@ -6482,6 +7419,6 @@ def get_jxl_metadata_from_bytesio(input):
                 case 7:
                     width = (height * 2) // 1
     else:
-        return (0,0)
+        return (0, 0)
 
     return (width, height)

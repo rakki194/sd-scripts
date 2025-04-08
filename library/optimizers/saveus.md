@@ -3,6 +3,7 @@
 SAVEUS is an advanced optimization algorithm that combines several optimization techniques for improved training stability and performance. Below is a detailed breakdown of each component.
 
 ## 1. Gradient Centralization
+
 Removes the mean of gradients for each layer to reduce internal covariate shift and improve training stability.
 
 $$
@@ -10,11 +11,13 @@ $$
 $$
 
 **Benefits**:
+
 - Reduces internal covariate shift
 - Improves training stability
 - Helps with generalization
 
 ## 2. Gradient Normalization
+
 Standardizes gradient magnitudes with interpolation between normalized and original values.
 
 $$
@@ -22,11 +25,13 @@ $$
 $$
 
 **Options**:
+
 - Channel-wise or global normalization
 - Controlled by normalization factor αₙ
 - Epsilon term for numerical stability
 
 ## 3. Momentum with Amplification
+
 Accelerates training in relevant directions using a two-step process:
 
 First, compute momentum:
@@ -40,11 +45,13 @@ g'_t = g_t + \gamma \cdot m_t \\[1em]
 $$
 
 **Key Features**:
+
 - Maintains exponential moving average of gradients
 - Amplifies current gradient using momentum history
 - Controlled by amp_fac (γ) parameter
 
 ## 4. Adaptive Moments
+
 Adapts learning rates per parameter using moment estimation:
 
 $$
@@ -61,11 +68,13 @@ $$
 $$
 
 **Components**:
+
 - Second moment estimation tracks squared gradients
 - Bias correction improves early training steps
 - Decay rates controlled by β₁ and β₂
 
 ## 5. Parameter Update
+
 Final weight update combining all components:
 
 $$
@@ -75,11 +84,13 @@ $$
 ## Optional Features
 
 ### Gradient Clipping
+
 - Clips gradients based on step-dependent threshold
 - Prevents explosive gradients
 - Threshold computed using customizable lambda function
 
 ### Decoupled Weight Decay
+
 - Applies L2 regularization directly to weights
 - More stable than traditional weight decay
 - Controlled by weight_decay parameter
@@ -98,4 +109,3 @@ $$
 & \epsilon: \text{ small constant for numerical stability}
 \end{align*}
 $$
-
