@@ -5485,6 +5485,16 @@ def get_optimizer(args, trainable_params) -> tuple[str, str, object]:
             raise ImportError("Importing SAVEUS failed")
         optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
+    elif optimizer_type == "SPARKLES".lower():
+        logger.info(f"use SPARKLES optimizer | {optimizer_kwargs}")
+        try:
+            from library.optimizers.sparkles import SPARKLES
+
+            optimizer_class = SPARKLES
+        except ImportError:
+            raise ImportError("Importing SPARKLES failed")
+        optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
+
     elif optimizer_type == "DOPE".lower():
         logger.info(f"use DOPE optimizer | {optimizer_kwargs}")
         try:
