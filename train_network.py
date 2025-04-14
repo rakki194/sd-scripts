@@ -17,11 +17,7 @@ from tqdm import tqdm
 import torch
 from torch.types import Number
 from library.device_utils import init_ipex, clean_memory_on_device
-from library.bf16_utils import (
-    add_bf16_arguments,
-    process_bf16_arguments,
-    convert_model_to_bf16,
-)
+from library.bf16_utils import enable_bf16, convert_model_to_bf16
 
 init_ipex()
 
@@ -2196,7 +2192,6 @@ def setup_parser() -> argparse.ArgumentParser:
     train_util.add_optimizer_arguments(parser)
     config_util.add_config_arguments(parser)
     custom_train_functions.add_custom_train_arguments(parser)
-    add_bf16_arguments(parser)  # Add BF16 support arguments
 
     parser.add_argument(
         "--cpu_offload_checkpointing",
@@ -2378,7 +2373,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
     train_util.verify_command_line_training_args(args)
     args = train_util.read_config_from_file(args, parser)
-    args = process_bf16_arguments(args)  # Process BF16 arguments
+
+    # Enable BF16 if requested
+    if args.full_bf16:
+        enable_bf16()
 
     trainer = NetworkTrainer()
     trainer.train(args)

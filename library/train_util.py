@@ -4295,9 +4295,6 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
         "--full_fp16", action="store_true", help="fp16 training including gradients"
     )
     parser.add_argument(
-        "--full_bf16", action="store_true", help="bf16 training including gradients"
-    )  # TODO move to SDXL training, because it is not supported by SD1/2
-    parser.add_argument(
         "--fp8_base", action="store_true", help="use fp8 for base model"
     )
 

@@ -8,7 +8,7 @@ import torch
 from accelerate import Accelerator
 
 from library.device_utils import clean_memory_on_device, init_ipex
-from library.bf16_utils import convert_model_to_bf16
+from library.bf16_utils import convert_model_to_bf16, enable_bf16
 
 init_ipex()
 
@@ -636,6 +636,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
     train_util.verify_command_line_training_args(args)
     args = train_util.read_config_from_file(args, parser)
+
+    # Enable BF16 if requested
+    if args.full_bf16:
+        enable_bf16()
 
     trainer = FluxNetworkTrainer()
     trainer.train(args)

@@ -4,7 +4,7 @@ from typing import List, Optional, Union
 import torch
 from accelerate import Accelerator
 from library.device_utils import init_ipex, clean_memory_on_device
-from library.bf16_utils import convert_model_to_bf16
+from library.bf16_utils import convert_model_to_bf16, enable_bf16
 
 init_ipex()
 
@@ -322,6 +322,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
     train_util.verify_command_line_training_args(args)
     args = train_util.read_config_from_file(args, parser)
+
+    # Enable BF16 if requested
+    if args.full_bf16:
+        enable_bf16()
 
     trainer = SdxlNetworkTrainer()
     trainer.train(args)
