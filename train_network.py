@@ -10,12 +10,10 @@ import time
 import json
 from multiprocessing import Value
 import numpy as np
-import toml
 
 from tqdm import tqdm
 
 import torch
-from torch.types import Number
 from library.device_utils import init_ipex, clean_memory_on_device
 from library.bf16_utils import enable_bf16, convert_model_to_bf16
 
@@ -42,7 +40,6 @@ import library.huggingface_util as huggingface_util
 import library.custom_train_functions as custom_train_functions
 from library.custom_train_functions import (
     apply_snr_weight,
-    get_weighted_text_embeddings,
     prepare_scheduler_for_custom_training,
     scale_v_prediction_loss_like_noise_prediction,
     add_v_prediction_like_loss,

@@ -1,7 +1,7 @@
 import torch
 import functools
 import logging
-from typing import Any, Callable, TypeVar, cast
+from typing import Callable, TypeVar, cast
 
 logger = logging.getLogger(__name__)
 

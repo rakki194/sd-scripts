@@ -1,10 +1,9 @@
 import argparse
-import math
-from typing import Any, Union
+from typing import Any, Optional, Union
 
 import torch
 from accelerate import Accelerator
-from library import sd3_models, strategy_sd3, utils
+from library import sd3_models, strategy_sd3
 from library.device_utils import init_ipex, clean_memory_on_device
 from library.bf16_utils import convert_model_to_bf16, enable_bf16
 
@@ -14,7 +13,6 @@ from library import (
     flux_models,
     flux_utils,
     sd3_train_utils,
-    sd3_utils,
     strategy_base,
     strategy_sd3,
     train_util,

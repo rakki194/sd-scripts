@@ -12,7 +12,6 @@ import pathlib
 import re
 import shutil
 import time
-import typing
 from typing import (
     Any,
     Callable,
