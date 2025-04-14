@@ -8,6 +8,7 @@ import torch
 from accelerate import Accelerator
 
 from library.device_utils import clean_memory_on_device, init_ipex
+from library.bf16_utils import convert_model_to_bf16
 
 init_ipex()
 
@@ -46,9 +47,14 @@ class FluxNetworkTrainer(train_network.NetworkTrainer):
         # sdxl_train_util.verify_sdxl_training_args(args)
 
         if args.fp8_base_unet:
-            args.fp8_base = True  # if fp8_base_unet is enabled, fp8_base is also enabled for FLUX.1
+            args.fp8_base = (
+                True  # if fp8_base_unet is enabled, fp8_base is also enabled for FLUX.1
+            )
 
-        if args.cache_text_encoder_outputs_to_disk and not args.cache_text_encoder_outputs:
+        if (
+            args.cache_text_encoder_outputs_to_disk
+            and not args.cache_text_encoder_outputs
+        ):
             logger.warning(
                 "cache_text_encoder_outputs_to_disk is enabled, so cache_text_encoder_outputs is also enabled."
             )
@@ -61,14 +67,18 @@ class FluxNetworkTrainer(train_network.NetworkTrainer):
 
         # prepare CLIP-L/T5XXL training flags
         self.train_clip_l = not args.network_train_unet_only
-        self.train_t5xxl = False  # default is False even if args.network_train_unet_only is False
+        self.train_t5xxl = (
+            False  # default is False even if args.network_train_unet_only is False
+        )
 
         if args.max_token_length is not None:
             logger.warning("max_token_length is not used in Flux training.")
 
         assert (
             args.blocks_to_swap is None or args.blocks_to_swap == 0
-        ) or not args.cpu_offload_checkpointing, "blocks_to_swap is not supported with cpu_offload_checkpointing."
+        ) or not args.cpu_offload_checkpointing, (
+            "blocks_to_swap is not supported with cpu_offload_checkpointing."
+        )
 
         # deprecated split_mode option
         if args.split_mode:
@@ -87,61 +97,22 @@ class FluxNetworkTrainer(train_network.NetworkTrainer):
             val_dataset_group.verify_bucket_reso_steps(32)  # TODO check this
 
     def load_target_model(self, args, weight_dtype, accelerator):
-        # currently offload to cpu for some models
-
-        # if the file is fp8 and we are using fp8_base, we can load it as is (fp8)
-        loading_dtype = None if args.fp8_base else weight_dtype
-
-        # if we load to cpu, flux.to(fp8) takes a long time, so we should load to gpu in future
-        self.is_schnell, model = flux_utils.load_flow_model(
-            args.pretrained_model_name_or_path, loading_dtype, "cpu", disable_mmap=args.disable_mmap_load_safetensors
+        model_version_info, text_encoders, vae, diff_model = (
+            flux_train_utils.load_target_model(args, accelerator, weight_dtype)
         )
-        if args.fp8_base:
-            # check dtype of model
-            if model.dtype == torch.float8_e4m3fnuz or model.dtype == torch.float8_e5m2 or model.dtype == torch.float8_e5m2fnuz:
-                raise ValueError(f"Unsupported fp8 model dtype: {model.dtype}")
-            elif model.dtype == torch.float8_e4m3fn:
-                logger.info("Loaded fp8 FLUX model")
-            else:
-                logger.info(
-                    "Cast FLUX model to fp8. This may take a while. You can reduce the time by using fp8 checkpoint."
-                )
-                model.to(torch.float8_e4m3fn)
 
-        # if args.split_mode:
-        #     model = self.prepare_split_model(model, weight_dtype, accelerator)
+        # Apply BF16 conversion if enabled
+        for i in range(len(text_encoders)):
+            text_encoders[i] = convert_model_to_bf16(text_encoders[i])
+        vae = convert_model_to_bf16(vae)
+        diff_model = convert_model_to_bf16(diff_model)
 
-        self.is_swapping_blocks = args.blocks_to_swap is not None and args.blocks_to_swap > 0
-        if self.is_swapping_blocks:
-            # Swap blocks between CPU and GPU to reduce memory usage, in forward and backward passes.
-            logger.info(f"enable block swap: blocks_to_swap={args.blocks_to_swap}")
-            model.enable_block_swap(args.blocks_to_swap, accelerator.device)
-
-        clip_l = flux_utils.load_clip_l(args.clip_l, weight_dtype, "cpu", disable_mmap=args.disable_mmap_load_safetensors)
-        clip_l.eval()
-
-        # if the file is fp8 and we are using fp8_base (not unet), we can load it as is (fp8)
-        if args.fp8_base and not args.fp8_base_unet:
-            loading_dtype = None  # as is
-        else:
-            loading_dtype = weight_dtype
-
-        # loading t5xxl to cpu takes a long time, so we should load to gpu in future
-        t5xxl = flux_utils.load_t5xxl(args.t5xxl, loading_dtype, "cpu", disable_mmap=args.disable_mmap_load_safetensors)
-        t5xxl.eval()
-        if args.fp8_base and not args.fp8_base_unet:
-            # check dtype of model
-            if t5xxl.dtype == torch.float8_e4m3fnuz or t5xxl.dtype == torch.float8_e5m2 or t5xxl.dtype == torch.float8_e5m2fnuz:
-                raise ValueError(f"Unsupported fp8 model dtype: {t5xxl.dtype}")
-            elif t5xxl.dtype == torch.float8_e4m3fn:
-                logger.info("Loaded fp8 T5XXL model")
-
-        ae = flux_utils.load_ae(args.ae, weight_dtype, "cpu", disable_mmap=args.disable_mmap_load_safetensors)
-
-        return flux_utils.MODEL_VERSION_FLUX_V1, [clip_l, t5xxl], ae, model
+        return model_version_info, text_encoders, vae, diff_model
 
     def get_tokenize_strategy(self, args):
-        _, is_schnell, _, _ = flux_utils.analyze_checkpoint_state(args.pretrained_model_name_or_path)
+        _, is_schnell, _, _ = flux_utils.analyze_checkpoint_state(
+            args.pretrained_model_name_or_path
+        )
 
         if args.t5xxl_max_token_length is None:
             if is_schnell:
@@ -152,17 +123,23 @@ class FluxNetworkTrainer(train_network.NetworkTrainer):
             t5xxl_max_token_length = args.t5xxl_max_token_length
 
         logger.info(f"t5xxl_max_token_length: {t5xxl_max_token_length}")
-        return strategy_flux.FluxTokenizeStrategy(t5xxl_max_token_length, args.tokenizer_cache_dir)
+        return strategy_flux.FluxTokenizeStrategy(
+            t5xxl_max_token_length, args.tokenizer_cache_dir
+        )
 
     def get_tokenizers(self, tokenize_strategy: strategy_flux.FluxTokenizeStrategy):
         return [tokenize_strategy.clip_l, tokenize_strategy.t5xxl]
 
     def get_latents_caching_strategy(self, args):
-        latents_caching_strategy = strategy_flux.FluxLatentsCachingStrategy(args.cache_latents_to_disk, args.vae_batch_size, False)
+        latents_caching_strategy = strategy_flux.FluxLatentsCachingStrategy(
+            args.cache_latents_to_disk, args.vae_batch_size, False
+        )
         return latents_caching_strategy
 
     def get_text_encoding_strategy(self, args):
-        return strategy_flux.FluxTextEncodingStrategy(apply_t5_attn_mask=args.apply_t5_attn_mask)
+        return strategy_flux.FluxTextEncodingStrategy(
+            apply_t5_attn_mask=args.apply_t5_attn_mask
+        )
 
     def post_process_network(self, args, accelerator, network, text_encoders, unet):
         # check t5xxl is trained or not
@@ -176,7 +153,9 @@ class FluxNetworkTrainer(train_network.NetworkTrainer):
     def get_models_for_text_encoding(self, args, accelerator, text_encoders):
         if args.cache_text_encoder_outputs:
             if self.train_clip_l and not self.train_t5xxl:
-                return text_encoders[0:1]  # only CLIP-L is needed for encoding because T5XXL is cached
+                return text_encoders[
+                    0:1
+                ]  # only CLIP-L is needed for encoding because T5XXL is cached
             else:
                 return None  # no text encoders are needed for encoding because both are cached
         else:
@@ -199,7 +178,14 @@ class FluxNetworkTrainer(train_network.NetworkTrainer):
             return None
 
     def cache_text_encoder_outputs_if_needed(
-        self, args, accelerator: Accelerator, unet, vae, text_encoders, dataset: train_util.DatasetGroup, weight_dtype
+        self,
+        args,
+        accelerator: Accelerator,
+        unet,
+        vae,
+        text_encoders,
+        dataset: train_util.DatasetGroup,
+        weight_dtype,
     ):
         if args.cache_text_encoder_outputs:
             if not args.lowram:
@@ -213,12 +199,16 @@ class FluxNetworkTrainer(train_network.NetworkTrainer):
 
             # When TE is not be trained, it will not be prepared so we need to use explicit autocast
             logger.info("move text encoders to gpu")
-            text_encoders[0].to(accelerator.device, dtype=weight_dtype)  # always not fp8
+            text_encoders[0].to(
+                accelerator.device, dtype=weight_dtype
+            )  # always not fp8
             text_encoders[1].to(accelerator.device)
 
             if text_encoders[1].dtype == torch.float8_e4m3fn:
                 # if we load fp8 weights, the model is already fp8, so we use it as is
-                self.prepare_text_encoder_fp8(1, text_encoders[1], text_encoders[1].dtype, weight_dtype)
+                self.prepare_text_encoder_fp8(
+                    1, text_encoders[1], text_encoders[1].dtype, weight_dtype
+                )
             else:
                 # otherwise, we need to convert it to target dtype
                 text_encoders[1].to(weight_dtype)
@@ -228,21 +218,39 @@ class FluxNetworkTrainer(train_network.NetworkTrainer):
 
             # cache sample prompts
             if args.sample_prompts is not None:
-                logger.info(f"cache Text Encoder outputs for sample prompt: {args.sample_prompts}")
+                logger.info(
+                    f"cache Text Encoder outputs for sample prompt: {args.sample_prompts}"
+                )
 
-                tokenize_strategy: strategy_flux.FluxTokenizeStrategy = strategy_base.TokenizeStrategy.get_strategy()
-                text_encoding_strategy: strategy_flux.FluxTextEncodingStrategy = strategy_base.TextEncodingStrategy.get_strategy()
+                tokenize_strategy: strategy_flux.FluxTokenizeStrategy = (
+                    strategy_base.TokenizeStrategy.get_strategy()
+                )
+                text_encoding_strategy: strategy_flux.FluxTextEncodingStrategy = (
+                    strategy_base.TextEncodingStrategy.get_strategy()
+                )
 
                 prompts = train_util.load_prompts(args.sample_prompts)
-                sample_prompts_te_outputs = {}  # key: prompt, value: text encoder outputs
+                sample_prompts_te_outputs = (
+                    {}
+                )  # key: prompt, value: text encoder outputs
                 with accelerator.autocast(), torch.no_grad():
                     for prompt_dict in prompts:
-                        for p in [prompt_dict.get("prompt", ""), prompt_dict.get("negative_prompt", "")]:
+                        for p in [
+                            prompt_dict.get("prompt", ""),
+                            prompt_dict.get("negative_prompt", ""),
+                        ]:
                             if p not in sample_prompts_te_outputs:
-                                logger.info(f"cache Text Encoder outputs for prompt: {p}")
+                                logger.info(
+                                    f"cache Text Encoder outputs for prompt: {p}"
+                                )
                                 tokens_and_masks = tokenize_strategy.tokenize(p)
-                                sample_prompts_te_outputs[p] = text_encoding_strategy.encode_tokens(
-                                    tokenize_strategy, text_encoders, tokens_and_masks, args.apply_t5_attn_mask
+                                sample_prompts_te_outputs[p] = (
+                                    text_encoding_strategy.encode_tokens(
+                                        tokenize_strategy,
+                                        text_encoders,
+                                        tokens_and_masks,
+                                        args.apply_t5_attn_mask,
+                                    )
                                 )
                 self.sample_prompts_te_outputs = sample_prompts_te_outputs
 
@@ -282,12 +290,32 @@ class FluxNetworkTrainer(train_network.NetworkTrainer):
     #     noise_pred = unet(noisy_latents, timesteps, text_embedding, vector_embedding)
     #     return noise_pred
 
-    def sample_images(self, accelerator, args, epoch, global_step, device, ae, tokenizer, text_encoder, flux):
+    def sample_images(
+        self,
+        accelerator,
+        args,
+        epoch,
+        global_step,
+        device,
+        ae,
+        tokenizer,
+        text_encoder,
+        flux,
+    ):
         text_encoders = text_encoder  # for compatibility
-        text_encoders = self.get_models_for_text_encoding(args, accelerator, text_encoders)
+        text_encoders = self.get_models_for_text_encoding(
+            args, accelerator, text_encoders
+        )
 
         flux_train_utils.sample_images(
-            accelerator, args, epoch, global_step, flux, ae, text_encoders, self.sample_prompts_te_outputs
+            accelerator,
+            args,
+            epoch,
+            global_step,
+            flux,
+            ae,
+            text_encoders,
+            self.sample_prompts_te_outputs,
         )
         # return
 
@@ -320,8 +348,12 @@ class FluxNetworkTrainer(train_network.NetworkTrainer):
         clean_memory_on_device(accelerator.device)
         """
 
-    def get_noise_scheduler(self, args: argparse.Namespace, device: torch.device) -> Any:
-        noise_scheduler = sd3_train_utils.FlowMatchEulerDiscreteScheduler(num_train_timesteps=1000, shift=args.discrete_flow_shift)
+    def get_noise_scheduler(
+        self, args: argparse.Namespace, device: torch.device
+    ) -> Any:
+        noise_scheduler = sd3_train_utils.FlowMatchEulerDiscreteScheduler(
+            num_train_timesteps=1000, shift=args.discrete_flow_shift
+        )
         self.noise_scheduler_copy = copy.deepcopy(noise_scheduler)
         return noise_scheduler
 
@@ -350,18 +382,29 @@ class FluxNetworkTrainer(train_network.NetworkTrainer):
         bsz = latents.shape[0]
 
         # get noisy model input and timesteps
-        noisy_model_input, timesteps, sigmas = flux_train_utils.get_noisy_model_input_and_timesteps(
-            args, noise_scheduler, latents, noise, accelerator.device, weight_dtype
+        noisy_model_input, timesteps, sigmas = (
+            flux_train_utils.get_noisy_model_input_and_timesteps(
+                args, noise_scheduler, latents, noise, accelerator.device, weight_dtype
+            )
         )
 
         # pack latents and get img_ids
-        packed_noisy_model_input = flux_utils.pack_latents(noisy_model_input)  # b, c, h*2, w*2 -> b, h*w, c*4
-        packed_latent_height, packed_latent_width = noisy_model_input.shape[2] // 2, noisy_model_input.shape[3] // 2
-        img_ids = flux_utils.prepare_img_ids(bsz, packed_latent_height, packed_latent_width).to(device=accelerator.device)
+        packed_noisy_model_input = flux_utils.pack_latents(
+            noisy_model_input
+        )  # b, c, h*2, w*2 -> b, h*w, c*4
+        packed_latent_height, packed_latent_width = (
+            noisy_model_input.shape[2] // 2,
+            noisy_model_input.shape[3] // 2,
+        )
+        img_ids = flux_utils.prepare_img_ids(
+            bsz, packed_latent_height, packed_latent_width
+        ).to(device=accelerator.device)
 
         # get guidance
         # ensure guidance_scale in args is float
-        guidance_vec = torch.full((bsz,), float(args.guidance_scale), device=accelerator.device)
+        guidance_vec = torch.full(
+            (bsz,), float(args.guidance_scale), device=accelerator.device
+        )
 
         # ensure the hidden state will require grad
         if args.gradient_checkpointing:
@@ -377,7 +420,16 @@ class FluxNetworkTrainer(train_network.NetworkTrainer):
         if not args.apply_t5_attn_mask:
             t5_attn_mask = None
 
-        def call_dit(img, img_ids, t5_out, txt_ids, l_pooled, timesteps, guidance_vec, t5_attn_mask):
+        def call_dit(
+            img,
+            img_ids,
+            t5_out,
+            txt_ids,
+            l_pooled,
+            timesteps,
+            guidance_vec,
+            t5_attn_mask,
+        ):
             # grad is enabled even if unet is not in train mode, because Text Encoder is in train mode
             with torch.set_grad_enabled(is_train), accelerator.autocast():
                 # YiYi notes: divide it by 1000 for now because we scale it by 1000 in the transformer model (we should not keep it but I want to keep the inputs same for the model for testing)
@@ -405,10 +457,14 @@ class FluxNetworkTrainer(train_network.NetworkTrainer):
         )
 
         # unpack latents
-        model_pred = flux_utils.unpack_latents(model_pred, packed_latent_height, packed_latent_width)
+        model_pred = flux_utils.unpack_latents(
+            model_pred, packed_latent_height, packed_latent_width
+        )
 
         # apply model prediction type
-        model_pred, weighting = flux_train_utils.apply_model_prediction_type(args, model_pred, noisy_model_input, sigmas)
+        model_pred, weighting = flux_train_utils.apply_model_prediction_type(
+            args, model_pred, noisy_model_input, sigmas
+        )
 
         # flow matching loss: this is different from SD3
         target = noise - latents
@@ -417,7 +473,10 @@ class FluxNetworkTrainer(train_network.NetworkTrainer):
         if "custom_attributes" in batch:
             diff_output_pr_indices = []
             for i, custom_attributes in enumerate(batch["custom_attributes"]):
-                if "diff_output_preservation" in custom_attributes and custom_attributes["diff_output_preservation"]:
+                if (
+                    "diff_output_preservation" in custom_attributes
+                    and custom_attributes["diff_output_preservation"]
+                ):
                     diff_output_pr_indices.append(i)
 
             if len(diff_output_pr_indices) > 0:
@@ -431,12 +490,24 @@ class FluxNetworkTrainer(train_network.NetworkTrainer):
                         txt_ids=txt_ids[diff_output_pr_indices],
                         l_pooled=l_pooled[diff_output_pr_indices],
                         timesteps=timesteps[diff_output_pr_indices],
-                        guidance_vec=guidance_vec[diff_output_pr_indices] if guidance_vec is not None else None,
-                        t5_attn_mask=t5_attn_mask[diff_output_pr_indices] if t5_attn_mask is not None else None,
+                        guidance_vec=(
+                            guidance_vec[diff_output_pr_indices]
+                            if guidance_vec is not None
+                            else None
+                        ),
+                        t5_attn_mask=(
+                            t5_attn_mask[diff_output_pr_indices]
+                            if t5_attn_mask is not None
+                            else None
+                        ),
                     )
-                network.set_multiplier(1.0)  # may be overwritten by "network_multipliers" in the next step
+                network.set_multiplier(
+                    1.0
+                )  # may be overwritten by "network_multipliers" in the next step
 
-                model_pred_prior = flux_utils.unpack_latents(model_pred_prior, packed_latent_height, packed_latent_width)
+                model_pred_prior = flux_utils.unpack_latents(
+                    model_pred_prior, packed_latent_height, packed_latent_width
+                )
                 model_pred_prior, _ = flux_train_utils.apply_model_prediction_type(
                     args,
                     model_pred_prior,
@@ -470,13 +541,19 @@ class FluxNetworkTrainer(train_network.NetworkTrainer):
 
     def prepare_text_encoder_grad_ckpt_workaround(self, index, text_encoder):
         if index == 0:  # CLIP-L
-            return super().prepare_text_encoder_grad_ckpt_workaround(index, text_encoder)
+            return super().prepare_text_encoder_grad_ckpt_workaround(
+                index, text_encoder
+            )
         else:  # T5XXL
             text_encoder.encoder.embed_tokens.requires_grad_(True)
 
-    def prepare_text_encoder_fp8(self, index, text_encoder, te_weight_dtype, weight_dtype):
+    def prepare_text_encoder_fp8(
+        self, index, text_encoder, te_weight_dtype, weight_dtype
+    ):
         if index == 0:  # CLIP-L
-            logger.info(f"prepare CLIP-L for fp8: set to {te_weight_dtype}, set embeddings to {weight_dtype}")
+            logger.info(
+                f"prepare CLIP-L for fp8: set to {te_weight_dtype}, set embeddings to {weight_dtype}"
+            )
             text_encoder.to(te_weight_dtype)  # fp8
             text_encoder.text_model.embeddings.to(dtype=weight_dtype)
         else:  # T5XXL
@@ -502,14 +579,21 @@ class FluxNetworkTrainer(train_network.NetworkTrainer):
                         # print("set", module.__class__.__name__, "hooks")
                         module.forward = forward_hook(module)
 
-            if flux_utils.get_t5xxl_actual_dtype(text_encoder) == torch.float8_e4m3fn and text_encoder.dtype == weight_dtype:
+            if (
+                flux_utils.get_t5xxl_actual_dtype(text_encoder) == torch.float8_e4m3fn
+                and text_encoder.dtype == weight_dtype
+            ):
                 logger.info(f"T5XXL already prepared for fp8")
             else:
-                logger.info(f"prepare T5XXL for fp8: set to {te_weight_dtype}, set embeddings to {weight_dtype}, add hooks")
+                logger.info(
+                    f"prepare T5XXL for fp8: set to {te_weight_dtype}, set embeddings to {weight_dtype}, add hooks"
+                )
                 text_encoder.to(te_weight_dtype)  # fp8
                 prepare_fp8(text_encoder, weight_dtype)
 
-    def on_validation_step_end(self, args, accelerator, network, text_encoders, unet, batch, weight_dtype):
+    def on_validation_step_end(
+        self, args, accelerator, network, text_encoders, unet, batch, weight_dtype
+    ):
         if self.is_swapping_blocks:
             # prepare for next forward: because backward pass is not called, we need to prepare it here
             accelerator.unwrap_model(unet).prepare_block_swap_before_forward()
@@ -523,7 +607,9 @@ class FluxNetworkTrainer(train_network.NetworkTrainer):
         # if we doesn't swap blocks, we can move the model to device
         flux: flux_models.Flux = unet
         flux = accelerator.prepare(flux, device_placement=[not self.is_swapping_blocks])
-        accelerator.unwrap_model(flux).move_to_device_except_swap_blocks(accelerator.device)  # reduce peak memory usage
+        accelerator.unwrap_model(flux).move_to_device_except_swap_blocks(
+            accelerator.device
+        )  # reduce peak memory usage
         accelerator.unwrap_model(flux).prepare_block_swap_before_forward()
 
         return flux
@@ -539,7 +625,7 @@ def setup_parser() -> argparse.ArgumentParser:
         action="store_true",
         # help="[EXPERIMENTAL] use split mode for Flux model, network arg `train_blocks=single` is required"
         # + "/[実験的] Fluxモデルの分割モードを使用する。ネットワーク引数`train_blocks=single`が必要",
-        help="[Deprecated] This option is deprecated. Please use `--blocks_to_swap` instead."
+        help="[Deprecated] This option is deprecated. Please use `--blocks_to_swap` instead.",
     )
     return parser
 

@@ -4,6 +4,7 @@ from typing import List, Optional, Union
 import torch
 from accelerate import Accelerator
 from library.device_utils import init_ipex, clean_memory_on_device
+from library.bf16_utils import convert_model_to_bf16
 
 init_ipex()
 
@@ -80,6 +81,12 @@ class SdxlNetworkTrainer(train_network.NetworkTrainer):
             torch.__version__ >= "2.0.0"
         ):  # PyTorch 2.0.0 以上対応のxformersなら以下が使える
             vae.set_use_memory_efficient_attention_xformers(args.xformers)
+
+        # Apply BF16 conversion if enabled
+        text_encoder1 = convert_model_to_bf16(text_encoder1)
+        text_encoder2 = convert_model_to_bf16(text_encoder2)
+        vae = convert_model_to_bf16(vae)
+        unet = convert_model_to_bf16(unet)
 
         return (
             sdxl_model_util.MODEL_VERSION_SDXL_BASE_V1_0,
