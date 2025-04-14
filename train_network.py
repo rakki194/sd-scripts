@@ -910,6 +910,13 @@ class NetworkTrainer:
             )
 
         if args.gradient_checkpointing:
+            import warnings
+
+            warnings.filterwarnings(
+                "ignore",
+                message="None of the inputs have requires_grad=True. Gradients will be None",
+            )
+
             if args.cpu_offload_checkpointing:
                 unet.enable_gradient_checkpointing(cpu_offload=True)
             else:
