@@ -19,6 +19,10 @@ from torch.types import Number
 from library.device_utils import init_ipex, clean_memory_on_device
 from library.bf16_utils import enable_bf16, convert_model_to_bf16
 
+# Configure torch._dynamo
+torch._dynamo.config.cache_size_limit = 64  # Increase from default 8
+torch._dynamo.config.suppress_errors = True  # Suppress dynamo warnings
+
 init_ipex()
 
 from accelerate.utils import set_seed
